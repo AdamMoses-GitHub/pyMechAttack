@@ -272,7 +272,7 @@ F2 - Show performance stats"""
         
     def _setup_logging(self):
         """Setup game logging"""
-        logger = logging.getLogger('BattleTech')
+        logger = logging.getLogger('pyMechAttack')
         if not logger.handlers:  # Avoid duplicate handlers
             logger.setLevel(logging.INFO)
             handler = logging.StreamHandler()
@@ -1041,7 +1041,7 @@ F2 - Show performance stats"""
         """Show the game setup screen for player configuration"""
         # Create the setup window as the main window
         setup_window = tk.Tk()
-        setup_window.title("BattleTech Game Setup")
+        setup_window.title("pyMechAttack Game Setup")
         setup_window.geometry("600x700")  # Larger to accommodate more players
         setup_window.resizable(True, True)  # Allow resizing
         
@@ -1077,7 +1077,7 @@ F2 - Show performance stats"""
         scrollbar.pack(side="right", fill="y")
         
         # Title
-        title_label = ttk.Label(scrollable_frame, text="BattleTech Hex Battle Setup", 
+        title_label = ttk.Label(scrollable_frame, text="pyMechAttack Setup", 
                                font=("Arial", 16, "bold"))
         title_label.pack(pady=(0, 20))
         
@@ -1264,7 +1264,7 @@ F2 - Show performance stats"""
             
             # Create the main game window with intelligent sizing
             self.root = tk.Tk()
-            self.root.title("BattleTech Hex Battle")
+            self.root.title("pyMechAttack")
             
             # Get screen dimensions for intelligent sizing
             screen_width = self.root.winfo_screenwidth()
@@ -2531,7 +2531,7 @@ F2 - Show performance stats"""
             return
             
         help_text = """
-BATTLETECH HEX BATTLE - COMPLETE GUIDE
+PYMECHATTACK - COMPLETE GUIDE
 
 === OBJECTIVE ===
 Destroy all enemy mechs to achieve victory! In multi-player games, be the last player standing!
@@ -2625,7 +2625,7 @@ Good hunting, MechWarrior! The battlefield awaits your command.
         
         # Create help window
         help_window = tk.Toplevel(self.root)
-        help_window.title("BattleTech Hex Battle - Complete Guide")
+        help_window.title("pyMechAttack - Complete Guide")
         help_window.geometry("700x600")
         help_window.resizable(True, True)
         help_window.transient(self.root)
@@ -2704,7 +2704,7 @@ Good hunting, MechWarrior! The battlefield awaits your command.
         if not self.root:
             return
             
-        self.log("BattleTech Hex Battle Started!")
+        self.log("pyMechAttack Started!")
         self.log("Click on your mechs to select them, then click on empty hexes to move.")
         self.log("Click on enemy mechs to target them, then use attack buttons.")
         self.update_display()
@@ -2735,7 +2735,7 @@ if __name__ == "__main__":
         game.setup_window.mainloop()
         
     except Exception as e:
-        error_msg = f"Failed to start BattleTech game: {str(e)}"
+        error_msg = f"Failed to start pyMechAttack: {str(e)}"
         print(error_msg)
         traceback.print_exc()
         input("Press Enter to exit...")

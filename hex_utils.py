@@ -1,5 +1,5 @@
 """
-BattleTech Game - Hex Coordinate & Pathfinding Utilities Module
+pyMechAttack - Hex Coordinate & Pathfinding Utilities Module
 Contains pure functions for hex grid mathematics, coordinate conversions,
 pathfinding algorithms, and line-of-sight calculations
 """

@@ -1,5 +1,5 @@
 """
-BattleTech Game - Entity Classes Module
+pyMechAttack - Entity Classes Module
 Contains HexTile and Mech classes representing game entities
 """
 

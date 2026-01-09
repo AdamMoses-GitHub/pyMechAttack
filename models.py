@@ -1,5 +1,5 @@
 """
-BattleTech Game - Data Models Module
+pyMechAttack - Data Models Module
 Contains data classes and enumerations for game entities
 """
 

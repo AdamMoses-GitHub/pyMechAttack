@@ -1,5 +1,5 @@
 """
-BattleTech Game - Custom Exceptions Module
+pyMechAttack - Custom Exceptions Module
 Contains all game-specific exception classes
 """
 

@@ -1,5 +1,5 @@
 """
-BattleTech Game - Animation System Module
+pyMechAttack - Animation System Module
 Contains all animation classes for visual effects
 """
 

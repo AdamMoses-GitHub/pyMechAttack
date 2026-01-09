@@ -1,5 +1,5 @@
 """
-BattleTech Game - Animation Rendering System Module
+pyMechAttack - Animation Rendering System Module
 Handles visual effects rendering for animations including movement, weapon fire,
 explosions, and selection highlights
 """
