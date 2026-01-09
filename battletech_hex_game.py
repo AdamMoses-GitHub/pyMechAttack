@@ -23,6 +23,11 @@ from entities import HexTile, Mech
 import hex_utils
 from animation_renderer import AnimationRenderer
 
+# Import UI modules
+from ui_setup_screen import GameSetupScreen
+from ui_game_window import GameWindowUI
+from ui_info_panels import InfoPanelManager
+
 if TYPE_CHECKING:
     from __main__ import BattleTechGame
 
@@ -304,73 +309,44 @@ F2 - Show performance stats"""
         self.activate_next_mech()
         
     def setup_ui(self):
-        """Setup the user interface"""
-        # Main frame
-        main_frame = ttk.Frame(self.root)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        """Setup the user interface using modular GameWindowUI"""
+        # Create game window UI
+        self.game_ui = GameWindowUI(self.root)
         
-        # Help link at the very top
-        help_link_frame = ttk.Frame(main_frame)
-        help_link_frame.pack(fill=tk.X, pady=(0, 5))
+        # Setup UI and get canvas reference
+        self.canvas = self.game_ui.setup(on_help_click=self.show_readme_popup)
         
-        help_label = tk.Label(help_link_frame, text="📖 Click here for gaming guide and instructions", 
-                             font=("Arial", 10, "bold"), foreground="#0066CC", cursor="hand2")
-        help_label.pack()
-        help_label.bind("<Button-1>", lambda e: self.show_readme_popup())
+        # Store references to UI components for backward compatibility
+        self.combat_log = self.game_ui.combat_log
+        self.turn_label = self.game_ui.turn_label
+        self.current_mech_label = self.game_ui.current_mech_label
+        self.initiative_frame = self.game_ui.initiative_frame
+        self.mech_info_frame = self.game_ui.mech_info_frame
+        self.target_info_frame = self.game_ui.target_info_frame
+        self.instruction_label = self.game_ui.instruction_label
+        self.status_label = self.game_ui.status_label
+        self.size_label = self.game_ui.size_label
+        self.left_frame = self.game_ui.left_frame
         
-        # Underline effect on hover
-        help_label.bind("<Enter>", lambda e: help_label.config(font=("Arial", 10, "bold underline")))
-        help_label.bind("<Leave>", lambda e: help_label.config(font=("Arial", 10, "bold")))
+        # Button references
+        self.attack_laser_btn = self.game_ui.attack_laser_btn
+        self.attack_missile_btn = self.game_ui.attack_missile_btn
+        self.end_movement_btn = self.game_ui.end_movement_btn
+        self.end_turn_btn = self.game_ui.end_turn_btn
+        self.help_btn = self.game_ui.help_btn
         
-        # Top section with map and turn info
-        top_frame = ttk.Frame(main_frame)
-        top_frame.pack(fill=tk.BOTH, expand=True)
+        # Set button commands
+        self.game_ui.set_button_command('laser', self.laser_attack)
+        self.game_ui.set_button_command('missile', self.missile_attack)
+        self.game_ui.set_button_command('end_movement', self.end_movement_phase)
+        self.game_ui.set_button_command('end_turn', self.end_turn)
+        self.game_ui.set_button_command('help', self.show_readme_popup)
         
-        # Left panel for game board
-        left_frame = ttk.Frame(top_frame)
-        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        
-        # Map Legend at the top
-        legend_title_frame = ttk.Frame(left_frame)
-        legend_title_frame.pack(fill=tk.X, pady=(0, 5))
-        
-        ttk.Label(legend_title_frame, text="Map Legend:", font=("Arial", 12, "bold")).pack(side=tk.LEFT)
-        ttk.Label(legend_title_frame, text="| Click & Drag to Pan View", font=("Arial", 9), foreground="blue").pack(side=tk.LEFT, padx=(20, 0))
-        
-        legend_frame = ttk.Frame(left_frame)
-        legend_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        # Create legend items in horizontal layout
-        terrain_types = [
-            ("lightgreen", "Clear (1)"),
-            ("darkgreen", "Forest (2, Cover)"),
-            ("lightblue", "Shallow Water (3)"),
-            ("darkblue", "Deep Water (X)"),
-            ("darkgray", "Mountain (X, Blocks LOS)")
-        ]
-        
-        for i, (color, description) in enumerate(terrain_types):
-            item_frame = ttk.Frame(legend_frame)
-            item_frame.pack(side=tk.LEFT, padx=(0, 15))
-            
-            # Color square
-            color_canvas = tk.Canvas(item_frame, width=15, height=15, highlightthickness=0)
-            color_canvas.pack(side=tk.LEFT, padx=(0, 3))
-            color_canvas.create_rectangle(0, 0, 15, 15, fill=color, outline="black")
-            
-            # Description
-            ttk.Label(item_frame, text=description, font=("Arial", 9)).pack(side=tk.LEFT)
-        
-        # Canvas for hex board with dynamic sizing
-        # Initial size will be set in calculate_canvas_size() after UI is ready
+        # Configure canvas
         self.canvas_width = 650  # Initial value, will be updated dynamically
         self.canvas_height = 450  # Initial value, will be updated dynamically
-        self.canvas = tk.Canvas(left_frame, bg="darkgreen", 
-                               scrollregion=(0, 0, self.total_map_width, self.total_map_height))
-        self.canvas.pack(fill=tk.BOTH, expand=True)  # Allow canvas to expand
-        
-        # Store reference to left_frame for canvas sizing calculations
-        self.left_frame = left_frame
+        self.canvas.config(bg="darkgreen", 
+                          scrollregion=(0, 0, self.total_map_width, self.total_map_height))
         
         # Bind canvas events for pan controls and game interaction
         self.canvas.bind("<ButtonPress-1>", self.on_canvas_press)
@@ -387,113 +363,14 @@ F2 - Show performance stats"""
         # Start animation loop
         self.start_animation_loop()
         
-        # Right panel for turn and initiative info
-        right_frame = ttk.Frame(top_frame, width=250)
-        right_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
-        right_frame.pack_propagate(False)
+        # Initialize info panel manager
+        self.info_panel_manager = InfoPanelManager(
+            self.mech_info_frame, 
+            self.target_info_frame, 
+            self.instruction_label
+        )
         
-        # Turn info section
-        ttk.Label(right_frame, text="Turn Information", font=("Arial", 14, "bold")).pack(pady=(0, 10))
-        
-        self.turn_label = ttk.Label(right_frame, text="Turn 1", font=("Arial", 12, "bold"))
-        self.turn_label.pack(pady=2)
-        
-        self.current_mech_label = ttk.Label(right_frame, text="Active: None", font=("Arial", 10))
-        self.current_mech_label.pack(pady=2)
-        
-        # Initiative order display
-        ttk.Label(right_frame, text="Initiative Order:", font=("Arial", 11, "bold")).pack(anchor=tk.W, pady=(15, 5))
-        self.initiative_frame = ttk.Frame(right_frame)
-        self.initiative_frame.pack(fill=tk.X, pady=5)
-        
-        # Combat log in right panel
-        ttk.Label(right_frame, text="Combat Log:", font=("Arial", 11, "bold")).pack(anchor=tk.W, pady=(20, 5))
-        
-        log_frame = ttk.Frame(right_frame)
-        log_frame.pack(fill=tk.BOTH, expand=True)
-        
-        self.combat_log = tk.Text(log_frame, height=12, state=tk.DISABLED, font=("Arial", 8))
-        scrollbar = ttk.Scrollbar(log_frame, orient=tk.VERTICAL, command=self.combat_log.yview)
-        self.combat_log.configure(yscrollcommand=scrollbar.set)
-        
-        self.combat_log.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        # Bottom panel for current mech information - use a more compact layout
-        bottom_frame = ttk.Frame(main_frame)
-        bottom_frame.pack(fill=tk.X, pady=(5, 0))
-        
-        # Create a collapsible info panel with tabs or compact layout
-        info_notebook = ttk.Notebook(bottom_frame)
-        info_notebook.pack(fill=tk.X, pady=2)
-        
-        # Tab 1: Mech Information
-        mech_tab = ttk.Frame(info_notebook)
-        info_notebook.add(mech_tab, text="Selected Mech")
-        
-        mech_info_frame = ttk.Frame(mech_tab)
-        mech_info_frame.pack(fill=tk.X, padx=5, pady=5)
-        
-        self.mech_info_frame = ttk.Frame(mech_info_frame)
-        self.mech_info_frame.pack(fill=tk.X, pady=2)
-        
-        # Instruction label
-        self.instruction_label = ttk.Label(mech_info_frame, text="Select a mech to see options", 
-                                         font=("Arial", 9), foreground="gray")
-        self.instruction_label.pack(anchor=tk.W, pady=(2, 0))
-        
-        # Tab 2: Target Information
-        target_tab = ttk.Frame(info_notebook)
-        info_notebook.add(target_tab, text="Target")
-        
-        target_info_frame = ttk.Frame(target_tab)
-        target_info_frame.pack(fill=tk.X, padx=5, pady=5)
-        
-        self.target_info_frame = ttk.Frame(target_info_frame)
-        self.target_info_frame.pack(fill=tk.X, pady=2)
-        
-        # Action buttons in a separate frame below tabs
-        button_frame = ttk.Frame(bottom_frame)
-        button_frame.pack(fill=tk.X, pady=(5, 0))
-        
-        # Create a more compact button layout
-        ttk.Label(button_frame, text="Actions:", font=("Arial", 10, "bold")).pack(side=tk.LEFT, padx=(5, 10))
-        
-        self.attack_laser_btn = ttk.Button(button_frame, text="🔫 Laser", 
-                                         command=self.laser_attack, state=tk.DISABLED, width=15)
-        self.attack_laser_btn.pack(side=tk.LEFT, padx=2)
-        
-        self.attack_missile_btn = ttk.Button(button_frame, text="🚀 Missile", 
-                                           command=self.missile_attack, state=tk.DISABLED, width=15)
-        self.attack_missile_btn.pack(side=tk.LEFT, padx=2)
-        
-        self.end_movement_btn = ttk.Button(button_frame, text="End Movement", 
-                                         command=self.end_movement_phase, state=tk.DISABLED, width=15)
-        self.end_movement_btn.pack(side=tk.LEFT, padx=2)
-        
-        self.end_turn_btn = ttk.Button(button_frame, text="End Turn", command=self.end_turn, width=12)
-        self.end_turn_btn.pack(side=tk.LEFT, padx=2)
-        
-        self.help_btn = ttk.Button(button_frame, text="Help", command=self.show_readme_popup, width=10)
-        self.help_btn.pack(side=tk.RIGHT, padx=(10, 5))
-        
-        # Status bar at the very bottom
-        status_frame = ttk.Frame(main_frame)
-        status_frame.pack(fill=tk.X, pady=(5, 0))
-        
-        # Add a separator line
-        separator = ttk.Separator(status_frame, orient='horizontal')
-        separator.pack(fill=tk.X, pady=(2, 5))
-        
-        self.status_label = ttk.Label(status_frame, text="Game initialized. Select a mech to begin.", 
-                                    font=("Arial", 9), foreground="darkblue")
-        self.status_label.pack(side=tk.LEFT, padx=5)
-        
-        # Add window size info (helpful for debugging layout issues)
-        self.size_label = ttk.Label(status_frame, text="", font=("Arial", 8), foreground="gray")
-        self.size_label.pack(side=tk.RIGHT, padx=5)
-        
-        # Update size info when window changes (will be bound after window creation)
+        # Update size info when window changes
         self.update_window_size_info()
         
         # Initialize status
@@ -767,14 +644,21 @@ F2 - Show performance stats"""
     
     def update_window_size_info(self):
         """Update the window size information in the status bar"""
-        if hasattr(self, 'size_label') and self.root:
+        if self.root:
             width = self.root.winfo_width()
             height = self.root.winfo_height()
-            self.size_label.config(text=f"{width}×{height}")
+            # Use game_ui wrapper if available
+            if hasattr(self, 'game_ui'):
+                self.game_ui.update_window_size_info(width, height)
+            elif hasattr(self, 'size_label'):
+                self.size_label.config(text=f"{width}×{height}")
     
     def update_status(self, message):
         """Update the status bar with a message"""
-        if hasattr(self, 'status_label'):
+        # Use game_ui wrapper if available, otherwise direct access
+        if hasattr(self, 'game_ui'):
+            self.game_ui.update_status(message)
+        elif hasattr(self, 'status_label'):
             self.status_label.config(text=message)
     
     def on_canvas_press(self, event):
@@ -1038,229 +922,47 @@ F2 - Show performance stats"""
                                                      self.selected_mech if hasattr(self, 'selected_mech') else None)
     
     def show_game_setup(self):
-        """Show the game setup screen for player configuration"""
-        # Create the setup window as the main window
-        setup_window = tk.Tk()
-        setup_window.title("pyMechAttack Game Setup")
-        setup_window.geometry("600x700")  # Larger to accommodate more players
-        setup_window.resizable(True, True)  # Allow resizing
-        
-        # Center the window on screen
-        setup_window.update_idletasks()
-        x = (setup_window.winfo_screenwidth() // 2) - (300)
-        y = (setup_window.winfo_screenheight() // 2) - (350)
-        setup_window.geometry(f"600x700+{x}+{y}")
-        
-        # Store reference to setup window
-        self.setup_window = setup_window
-        
-        # Ensure it's visible and on top
-        setup_window.lift()
-        setup_window.focus_force()
-        setup_window.attributes('-topmost', True)
-        setup_window.after(100, lambda: setup_window.attributes('-topmost', False))
-        
-        # Main frame with scrollable content
-        main_canvas = tk.Canvas(setup_window)
-        scrollbar = ttk.Scrollbar(setup_window, orient="vertical", command=main_canvas.yview)
-        scrollable_frame = ttk.Frame(main_canvas)
-        
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: main_canvas.configure(scrollregion=main_canvas.bbox("all"))
+        """Show the game setup screen using modular GameSetupScreen"""
+        # Create setup screen with callbacks
+        self._setup_screen = GameSetupScreen(
+            on_start_callback=self._on_setup_complete,
+            on_cancel_callback=self._on_setup_cancel
         )
         
-        main_canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        main_canvas.configure(yscrollcommand=scrollbar.set)
-        
-        main_canvas.pack(side="left", fill="both", expand=True, padx=20, pady=20)
-        scrollbar.pack(side="right", fill="y")
-        
-        # Title
-        title_label = ttk.Label(scrollable_frame, text="pyMechAttack Setup", 
-                               font=("Arial", 16, "bold"))
-        title_label.pack(pady=(0, 20))
-        
-        # Game Configuration
-        game_config_frame = ttk.LabelFrame(scrollable_frame, text="Game Configuration", padding="10")
-        game_config_frame.pack(fill=tk.X, pady=(0, 15))
-        
-        # Player count selection
-        player_count_frame = ttk.Frame(game_config_frame)
-        player_count_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        ttk.Label(player_count_frame, text="Number of Players:").pack(side=tk.LEFT)
-        self.player_count_var = tk.IntVar(value=2)
-        for i in range(2, 5):
-            ttk.Radiobutton(player_count_frame, text=str(i), variable=self.player_count_var, 
-                           value=i, command=self.on_player_count_change).pack(side=tk.LEFT, padx=(10, 0))
-        
-        # Player configuration area
-        self.player_config_frame = ttk.Frame(scrollable_frame)
-        self.player_config_frame.pack(fill=tk.X, pady=(0, 15))
-        
-        # AI Settings
-        ai_settings_frame = ttk.LabelFrame(scrollable_frame, text="AI Settings", padding="10")
-        ai_settings_frame.pack(fill=tk.X, pady=(0, 20))
-        
-        speed_frame = ttk.Frame(ai_settings_frame)
-        speed_frame.pack(fill=tk.X)
-        
-        ttk.Label(speed_frame, text="AI Action Speed (seconds):").pack(side=tk.LEFT)
-        self.ai_speed_var = tk.DoubleVar(value=2.0)
-        ai_speed_spinbox = ttk.Spinbox(speed_frame, from_=0.5, to=10.0, increment=0.5, 
-                                      textvariable=self.ai_speed_var, width=8, format="%.1f")
-        ai_speed_spinbox.pack(side=tk.LEFT, padx=(10, 0))
-        
-        ttk.Label(speed_frame, text="(Controls how fast AI takes actions)").pack(side=tk.LEFT, padx=(10, 0))
-        
-        # Initial Proximity Settings
-        proximity_settings_frame = ttk.LabelFrame(scrollable_frame, text="Initial Proximity", padding="10")
-        proximity_settings_frame.pack(fill=tk.X, pady=(0, 20))
-        
-        proximity_frame = ttk.Frame(proximity_settings_frame)
-        proximity_frame.pack(fill=tk.X)
-        
-        ttk.Label(proximity_frame, text="Starting Distance Between Teams:").pack(side=tk.LEFT)
-        self.proximity_var = tk.StringVar(value="medium")
-        
-        proximity_options = [
-            ("Close", "close", "Teams start very close for immediate combat"),
-            ("Medium", "medium", "Balanced starting distance (default)"),
-            ("Far", "far", "Teams start at opposite ends for extended maneuvering")
-        ]
-        
-        for text, value, tooltip in proximity_options:
-            radio = ttk.Radiobutton(proximity_frame, text=text, variable=self.proximity_var, value=value)
-            radio.pack(side=tk.LEFT, padx=(10, 0))
-        
-        ttk.Label(proximity_settings_frame, text="Controls how close teams spawn to each other at game start", 
-                 font=("Arial", 9), foreground="gray").pack(pady=(5, 0))
-        
-        # Buttons
-        button_frame = ttk.Frame(scrollable_frame)
-        button_frame.pack(fill=tk.X)
-        
-        ttk.Button(button_frame, text="Start Game", command=lambda: self.start_game_from_setup(setup_window)).pack(side=tk.RIGHT, padx=(10, 0))
-        ttk.Button(button_frame, text="Cancel", command=self.cancel_setup).pack(side=tk.RIGHT)
-        
-        # Initialize player configuration
-        self.player_name_vars = []
-        self.player_type_vars = []
-        self.on_player_count_change()
+        # Show the setup screen and store reference
+        self.setup_window = self._setup_screen.show()
     
-    def cancel_setup(self):
-        """Cancel setup and exit application"""
+    def _on_setup_complete(self, config: dict):
+        """Handle setup completion with configuration"""
+        # Update game configuration from setup
+        self.num_players = config['num_players']
+        self.ai_action_speed = config['ai_speed']
+        self.initial_proximity = config['proximity']
+        
+        # Update player configurations
+        player_colors = ["#FF073A", "#00D9FF", "#BC13FE", "#FFFF00"]
+        for i, player_config in enumerate(config['players']):
+            self.players[i]['name'] = player_config['name']
+            self.players[i]['is_ai'] = player_config['is_ai']
+            self.players[i]['color'] = player_colors[i]
+        
+        # Start the game
+        self.start_game_from_setup(self.setup_window)
+    
+    def _on_setup_cancel(self):
+        """Handle setup cancellation"""
         if hasattr(self, 'setup_window'):
             self.setup_window.quit()
             self.setup_window.destroy()
     
-    def on_player_count_change(self):
-        """Handle player count change"""
-        self.num_players = self.player_count_var.get()
-        self.create_player_config_ui()
-    
-    def create_player_config_ui(self):
-        """Create dynamic player configuration UI based on player count"""
-        # Clear existing player config
-        for widget in self.player_config_frame.winfo_children():
-            widget.destroy()
-        
-        # Reset variables
-        self.player_name_vars = []
-        self.player_type_vars = []
-        
-        # Color options for players
-        player_colors = ["Neon Red", "Neon Blue", "Neon Purple", "Neon Yellow"]
-        
-        for i in range(self.num_players):
-            player_id = i + 1
-            color_name = player_colors[i]
-            
-            # Player frame
-            player_frame = ttk.LabelFrame(self.player_config_frame, 
-                                        text=f"Player {player_id} ({color_name} Mechs)", 
-                                        padding="10")
-            player_frame.pack(fill=tk.X, pady=(0, 10))
-            
-            # Player type (Human/AI)
-            type_var = tk.BooleanVar(value=(i == 0))  # First player is human by default
-            self.player_type_vars.append(type_var)
-            
-            ttk.Radiobutton(player_frame, text="Human Player", variable=type_var, 
-                           value=True, command=lambda idx=i: self.on_player_type_change(idx)).pack(anchor=tk.W)
-            ttk.Radiobutton(player_frame, text="AI Player", variable=type_var, 
-                           value=False, command=lambda idx=i: self.on_player_type_change(idx)).pack(anchor=tk.W)
-            
-            # Player name
-            name_frame = ttk.Frame(player_frame)
-            name_frame.pack(fill=tk.X, pady=(10, 0))
-            
-            ttk.Label(name_frame, text="Name:").pack(side=tk.LEFT)
-            
-            if i == 0:
-                default_name = "Player 1"
-            else:
-                default_name = self.get_random_ai_name()
-            
-            name_var = tk.StringVar(value=default_name)
-            self.player_name_vars.append(name_var)
-            
-            name_entry = ttk.Entry(name_frame, textvariable=name_var)
-            name_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(10, 0))
-            
-            # Set initial state
-            if not type_var.get():  # AI player
-                name_entry.config(state=tk.DISABLED)
-    
-    def on_player_type_change(self, player_index):
-        """Handle player type change for a specific player"""
-        type_var = self.player_type_vars[player_index]
-        name_var = self.player_name_vars[player_index]
-        
-        # Find the entry widget (bit hacky but works)
-        player_frame = self.player_config_frame.winfo_children()[player_index]
-        name_frame = None
-        for child in player_frame.winfo_children():
-            if isinstance(child, ttk.Frame):
-                name_frame = child
-                break
-        
-        if name_frame:
-            entry_widget = None
-            for child in name_frame.winfo_children():
-                if isinstance(child, ttk.Entry):
-                    entry_widget = child
-                    break
-            
-            if entry_widget:
-                if type_var.get():  # Human player
-                    entry_widget.config(state=tk.NORMAL)
-                    name_var.set(f"Player {player_index + 1}")
-                else:  # AI player
-                    entry_widget.config(state=tk.DISABLED)
-                    name_var.set(self.get_random_ai_name())
-    
-    def get_random_ai_name(self) -> str:
-        """Get a random AI name"""
-        return random.choice(self.ai_names)
-    
-
     def start_game_from_setup(self, setup_window):
         """Start the game with the configured settings"""
         try:
-            # Save player configuration from UI
-            self.num_players = self.player_count_var.get()
-            self.ai_action_speed = self.ai_speed_var.get()
-            self.initial_proximity = self.proximity_var.get()
+            # Configuration already set by _on_setup_complete, just validate
+            self._validate_configuration()
             
-            # Update player configuration
-            for i in range(self.num_players):
-                player_name = self.player_name_vars[i].get().strip() or f"Player {i+1}"
-                is_ai = not self.player_type_vars[i].get()
-                
-                self.players[i]["name"] = player_name
-                self.players[i]["is_ai"] = is_ai
+            # Player configuration already updated by _on_setup_complete callback
+            # No need to read from UI variables that no longer exist
             
             # Create the main game window with intelligent sizing
             self.root = tk.Tk()
@@ -1652,15 +1354,15 @@ F2 - Show performance stats"""
     
     def log(self, message: str):
         """Add message to combat log"""
-        # Check if combat log exists (UI might not be set up yet)
-        if hasattr(self, 'combat_log'):
+        # Use game_ui wrapper if available, otherwise direct access for backward compatibility
+        if hasattr(self, 'game_ui'):
+            self.game_ui.log_message(message)
+        elif hasattr(self, 'combat_log'):
             self.combat_log.config(state=tk.NORMAL)
             self.combat_log.insert(tk.END, message + "\n")
             self.combat_log.see(tk.END)
             self.combat_log.config(state=tk.DISABLED)
-        else:
-            # If UI isn't set up yet, messages go to console during initialization
-            pass  # Silent during initialization
+        # Silent if UI isn't set up yet
     
     def calculate_initiative_order(self) -> List[Mech]:
         """Calculate initiative order for mechs - alive mechs first, then destroyed mechs"""
