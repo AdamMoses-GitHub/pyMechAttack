@@ -23,6 +23,7 @@ from entities import HexTile, Mech
 import hex_utils
 from animation_renderer import AnimationRenderer
 from game_state import GameState
+from combat_system import CombatSystem
 
 # Import UI modules
 from ui_setup_screen import GameSetupScreen
@@ -41,6 +42,9 @@ class BattleTechGame:
         
         # Initialize game state manager
         self.state = GameState()
+        
+        # Initialize combat system
+        self.combat = CombatSystem(self.state, hex_utils)
         
         # AI names for random selection
         self.ai_names = [
@@ -1017,28 +1021,7 @@ F2 - Show performance stats"""
     
     def get_mechs_in_range(self, attacking_mech: Mech, weapon_type: str) -> list[Mech]:
         """Get all enemy mechs within range of the specified weapon and with clear LOS"""
-        if weapon_type == "laser":
-            base_range = 8
-        elif weapon_type == "missile":
-            base_range = 12
-        else:
-            return []
-        
-        targets = []
-        for mech in self.state.mechs:
-            if mech.player_id != attacking_mech.player_id and not mech.is_destroyed():
-                distance = attacking_mech.hex_tile.distance_to(mech.hex_tile)
-                
-                # Check line of sight
-                has_los, range_modifier = self.has_line_of_sight(attacking_mech.hex_tile, mech.hex_tile)
-                
-                if has_los:
-                    # Apply range reduction from forests
-                    effective_range = base_range - range_modifier
-                    if distance <= effective_range:
-                        targets.append(mech)
-        
-        return targets
+        return self.combat.get_mechs_in_range(attacking_mech, weapon_type)
 
     def draw_board(self):
         """Draw the hex board and all game elements with performance optimization"""
@@ -1439,7 +1422,7 @@ F2 - Show performance stats"""
             return
             
         # Find enemies (mechs from all other players)
-        enemies = [m for m in self.state.mechs if m.player_id != mech.player_id and not m.is_destroyed()]
+        enemies = self.combat.get_enemies_for_mech(mech)
         if not enemies:
             self.end_turn()
             return
@@ -1599,75 +1582,11 @@ F2 - Show performance stats"""
     
     def ai_should_stop_moving(self, mech: Mech, enemies) -> bool:
         """Determine if AI should stop moving and start attacking"""
-        if mech.get_remaining_movement() <= 0:
-            return True
-        
-        # Check if we're in good attack position
-        for enemy in enemies:
-            distance = mech.hex_tile.distance_to(enemy.hex_tile)
-            has_los, _ = self.has_line_of_sight(mech.hex_tile, enemy.hex_tile)
-            
-            # Stop if we can make a good laser attack
-            if distance <= 8 and has_los:
-                return True
-            
-            # Stop if we can make a decent missile attack and enemy is low on health
-            if distance <= 10 and has_los:
-                health_ratio = (enemy.stats.armor_hp + enemy.stats.structure_hp) / (enemy.stats.max_armor_hp + enemy.stats.max_structure_hp)
-                if health_ratio < 0.4:  # Enemy is badly damaged
-                    return True
-        
-        return False
+        return self.combat.should_ai_stop_moving_for_attack(mech, enemies)
     
     def ai_choose_target_and_weapon(self, mech: Mech, enemies) -> tuple[Mech | None, str | None]:
         """Choose the best target and weapon for attacking"""
-        best_target = None
-        best_weapon = None
-        best_score = float('-inf')
-        
-        for enemy in enemies:
-            distance = mech.hex_tile.distance_to(enemy.hex_tile)
-            has_los, range_modifier = self.has_line_of_sight(mech.hex_tile, enemy.hex_tile)
-            
-            if not has_los:
-                continue  # Can't attack without line of sight
-            
-            # Try both weapons
-            for weapon_type in ["laser", "missile"]:
-                weapon_range = 8 if weapon_type == "laser" else 12
-                
-                if distance > weapon_range:
-                    continue  # Out of range
-                
-                # Calculate hit chance and expected damage
-                hit_chance = mech.calculate_hit_chance(enemy, weapon_type)
-                base_damage = mech.stats.laser_attack if weapon_type == "laser" else mech.stats.missile_attack
-                expected_damage = hit_chance * base_damage
-                
-                # Calculate score for this attack
-                score = expected_damage
-                
-                # Bonus for finishing off enemies
-                enemy_health = enemy.stats.armor_hp + enemy.stats.structure_hp
-                if expected_damage >= enemy_health:
-                    score += 200  # Big bonus for potential kill
-                
-                # Prefer laser over missile when both are viable (more accurate)
-                if weapon_type == "laser" and distance <= 8:
-                    score += 10
-                
-                # Range penalty
-                optimal_range = weapon_range // 2
-                if distance > optimal_range:
-                    range_penalty = (distance - optimal_range) * 5
-                    score -= range_penalty
-                
-                if score > best_score:
-                    best_score = score
-                    best_target = enemy
-                    best_weapon = weapon_type
-        
-        return best_target, best_weapon
+        return self.combat.find_optimal_attack_target(mech, enemies)
     
     def on_canvas_click(self, event):
         """Handle canvas click events"""
