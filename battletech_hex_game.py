@@ -22,6 +22,7 @@ from animations import Animation, MoveAnimation, WeaponFireAnimation, ExplosionA
 from entities import HexTile, Mech
 import hex_utils
 from animation_renderer import AnimationRenderer
+from game_state import GameState
 
 # Import UI modules
 from ui_setup_screen import GameSetupScreen
@@ -33,30 +34,13 @@ if TYPE_CHECKING:
 
 
 class BattleTechGame:
-    """Main game class"""
+    """Main game class - coordinates game subsystems"""
     def __init__(self):
         # Don't create root window yet - will be created after setup
         self.root = None
         
-        # Validate and set multi-player configuration (2-4 players)
-        self.num_players = 2  # Default to 2 players
-        if not (2 <= self.num_players <= 4):
-            raise ValueError("Number of players must be between 2 and 4")
-            
-        self.players = [
-            {"name": "Player 1", "is_ai": False, "color": "#FF073A"},  # Neon Red
-            {"name": "Player 2", "is_ai": True, "color": "#00D9FF"},    # Neon Blue
-            {"name": "Player 3", "is_ai": False, "color": "#BC13FE"},  # Neon Purple
-            {"name": "Player 4", "is_ai": True, "color": "#FFFF00"}    # Neon Yellow
-        ]
-        
-        # Validate AI action speed
-        self.ai_action_speed = 2.0  # Default 2 seconds delay for AI actions
-        if self.ai_action_speed < 0.1:
-            self.ai_action_speed = 0.1  # Minimum speed limit
-        
-        # Initial proximity setting
-        self.initial_proximity = "medium"  # Default proximity setting
+        # Initialize game state manager
+        self.state = GameState()
         
         # AI names for random selection
         self.ai_names = [
@@ -65,16 +49,6 @@ class BattleTechGame:
             "Major Blitz", "Captain Razor", "Colonel Frost", "General Phoenix",
             "Marshal Thunder", "Admiral Hawk", "Commander Bolt", "Major Reaper"
         ]
-        
-        # Game state - initialize to None/empty, will be set up after player configuration
-        self.board_size = 20  # Increased from 15 to 20 for larger battlefield
-        self.hex_tiles: Dict[Tuple[int, int], HexTile] = {}
-        self.mechs: List[Mech] = []
-        self.initiative_order: List[Mech] = []  # Order of mech activation
-        self.current_mech_index = 0  # Index in initiative order
-        self.current_turn = 1
-        self.selected_mech: Optional[Mech] = None
-        self.game_over = False
         
         # Validate configuration after initialization
         self._validate_configuration()
@@ -129,17 +103,12 @@ class BattleTechGame:
         self.view_offset_y = 0
         
         # Calculate total map size (much larger than visible area)
-        self.total_map_width = self.hex_size * 3 * self.board_size
-        self.total_map_height = self.hex_size * 2 * self.board_size
-        
-        # Game not initialized yet - this will happen after player setup
-        self.game_initialized = False
+        self.total_map_width = self.hex_size * 3 * self.state.board_size
+        self.total_map_height = self.hex_size * 2 * self.state.board_size
         
     def _validate_hex_coordinates(self, q: int, r: int) -> bool:
         """Validate hex coordinates are within board bounds"""
-        return (isinstance(q, int) and isinstance(r, int) and 
-                abs(q) <= self.board_size and abs(r) <= self.board_size and 
-                abs(-q-r) <= self.board_size)
+        return self.state.validate_hex_coordinates(q, r)
                 
     def _safe_destroy_widget(self, widget):
         """Safely destroy a tkinter widget"""
@@ -181,28 +150,28 @@ class BattleTechGame:
     def _validate_configuration(self):
         """Validate game configuration parameters"""
         # Only validate if we have players configured
-        if not hasattr(self, 'players') or not self.players:
+        if not self.state.players:
             return  # Skip validation if players not set up yet
             
         # Validate player count
-        if not (2 <= self.num_players <= 4):
-            raise ConfigurationException(f"Invalid player count: {self.num_players}. Must be 2-4.")
+        if not (2 <= self.state.num_players <= 4):
+            raise ConfigurationException(f"Invalid player count: {self.state.num_players}. Must be 2-4.")
         
         # Validate board size
-        if hasattr(self, 'board_size') and not (10 <= self.board_size <= 50):
-            raise ConfigurationException(f"Invalid board size: {self.board_size}. Must be 10-50.")
+        if not (10 <= self.state.board_size <= 50):
+            raise ConfigurationException(f"Invalid board size: {self.state.board_size}. Must be 10-50.")
         
         # Validate AI speed
-        if hasattr(self, 'ai_action_speed') and not (0.1 <= self.ai_action_speed <= 10.0):
-            raise ConfigurationException(f"Invalid AI speed: {self.ai_action_speed}. Must be 0.1-10.0.")
+        if not (0.1 <= self.state.ai_action_speed <= 10.0):
+            raise ConfigurationException(f"Invalid AI speed: {self.state.ai_action_speed}. Must be 0.1-10.0.")
         
         # Validate proximity setting
         valid_proximities = ["close", "medium", "far"]
-        if hasattr(self, 'initial_proximity') and self.initial_proximity not in valid_proximities:
-            raise ConfigurationException(f"Invalid proximity: {self.initial_proximity}. Must be one of {valid_proximities}.")
+        if self.state.initial_proximity not in valid_proximities:
+            raise ConfigurationException(f"Invalid proximity: {self.state.initial_proximity}. Must be one of {valid_proximities}.")
         
         # Validate player colors
-        for i, player in enumerate(self.players):
+        for i, player in enumerate(self.state.players):
             if "color" not in player:
                 raise ConfigurationException(f"Player {i+1} missing color configuration.")
             # Basic hex color validation
@@ -289,20 +258,17 @@ F2 - Show performance stats"""
     def initialize_first_turn(self):
         """Initialize the first turn without showing popup immediately"""
         # Reset all mechs
-        for mech in self.mechs:
+        for mech in self.state.mechs:
             if not mech.is_destroyed():
                 mech.start_turn()
         
         # Calculate initial initiative order
-        self.initiative_order = self.calculate_initiative_order()
-        self.current_mech_index = 0
+        self.state.update_initiative_order()
         
         # Clear selections
-        self.selected_mech = None
-        if hasattr(self, 'target_mech'):
-            delattr(self, 'target_mech')
+        self.state.clear_selection()
         
-        self.log(f"=== TURN {self.current_turn} ===")
+        self.log(f"=== TURN {self.state.current_turn} ===")
         self.log("Initial initiative order calculated!")
         
         self.update_initiative_display()
@@ -378,9 +344,9 @@ F2 - Show performance stats"""
         
     def create_board(self):
         """Create the hex board"""
-        for q in range(-self.board_size, self.board_size + 1):
-            for r in range(max(-self.board_size, -q - self.board_size), 
-                          min(self.board_size, -q + self.board_size) + 1):
+        for q in range(-self.state.board_size, self.state.board_size + 1):
+            for r in range(max(-self.state.board_size, -q - self.state.board_size), 
+                          min(self.state.board_size, -q + self.state.board_size) + 1):
                 # Add terrain variety with realistic distribution
                 rand = random.random()
                 if rand < 0.15:
@@ -395,15 +361,15 @@ F2 - Show performance stats"""
                     terrain = "clear"
                 
                 hex_tile = HexTile(q, r, terrain)
-                self.hex_tiles[(q, r)] = hex_tile
+                self.state.hex_tiles[(q, r)] = hex_tile
     
     def setup_mechs(self):
         """Setup initial mechs for all players"""
         # Validate game state
-        if not self.hex_tiles:
+        if not self.state.hex_tiles:
             raise RuntimeError("Board must be created before setting up mechs")
-        if not (2 <= self.num_players <= 4):
-            raise ValueError(f"Invalid number of players: {self.num_players}")
+        if not (2 <= self.state.num_players <= 4):
+            raise ValueError(f"Invalid number of players: {self.state.num_players}")
             
         # Define starting positions for each player (up to 4 players)
         starting_sides = ["northwest", "southeast", "northeast", "southwest"]
@@ -416,8 +382,8 @@ F2 - Show performance stats"""
             ("Locust", 8, 12, 15, 30, 25),    # Light scout mech
         ]
         
-        for player_id in range(1, self.num_players + 1):
-            player_info = self.players[player_id - 1]
+        for player_id in range(1, self.state.num_players + 1):
+            player_info = self.state.players[player_id - 1]
             player_name = player_info["name"]
             player_color = player_info["color"]
             
@@ -435,15 +401,15 @@ F2 - Show performance stats"""
             for i, pos in enumerate(player_positions):
                 if i < len(player_mech_types):
                     stats = player_mech_types[i]
-                    mech = Mech(player_id, stats, self.hex_tiles[pos])
+                    mech = Mech(player_id, stats, self.state.hex_tiles[pos])
                     mech.color = player_color  # Set the proper color
                     
                     # Set up callbacks for game interactions (replaces _game_ref)
                     mech.on_move_animation = lambda m, old, new: self.start_move_animation(m, old, new)
                     mech.on_hex_dirty = lambda q, r: self._mark_hex_dirty(q, r)
-                    mech.get_line_of_sight = lambda from_h, to_h: hex_utils.has_line_of_sight(from_h, to_h, self.hex_tiles)
+                    mech.get_line_of_sight = lambda from_h, to_h: hex_utils.has_line_of_sight(from_h, to_h, self.state.hex_tiles)
                     
-                    self.mechs.append(mech)
+                    self.state.add_mech(mech)
     
     def find_starting_positions(self, player_id: int, side: str, num_mechs: int = 4) -> list[tuple[int, int]]:
         """Find suitable starting positions on clear terrain or forests in corner areas"""
@@ -455,48 +421,48 @@ F2 - Show performance stats"""
         # where s = -q - r
         
         # Calculate corner offset based on proximity setting
-        if self.initial_proximity == "close":
-            corner_offset = int(self.board_size * 0.25)  # Very close (25% of board radius)
-        elif self.initial_proximity == "far":
-            corner_offset = int(self.board_size * 0.95)  # Very far (95% of board radius)
+        if self.state.initial_proximity == "close":
+            corner_offset = int(self.state.board_size * 0.25)  # Very close (25% of board radius)
+        elif self.state.initial_proximity == "far":
+            corner_offset = int(self.state.board_size * 0.95)  # Very far (95% of board radius)
         else:  # medium (default)
-            corner_offset = int(self.board_size * 0.65)  # Medium distance (65% of board radius)
+            corner_offset = int(self.state.board_size * 0.65)  # Medium distance (65% of board radius)
         
         if side == "northwest":
             # Top-left corner: negative q, negative r, but s = -q-r must be valid
             # For corner, want q ≈ -board_size, r ≈ 0 (top edge)
-            q_range = range(-self.board_size, -corner_offset)
+            q_range = range(-self.state.board_size, -corner_offset)
             r_range = range(-corner_offset, 1)
         elif side == "northeast":
             # Top-right corner: positive q, negative r
             # For corner, want q ≈ 0, r ≈ -board_size (right-top edge)
             q_range = range(-corner_offset, 1)
-            r_range = range(-self.board_size, -corner_offset)
+            r_range = range(-self.state.board_size, -corner_offset)
         elif side == "southwest":
             # Bottom-left corner: negative q, positive r
             # For corner, want q ≈ 0, r ≈ board_size (left-bottom edge)
             q_range = range(-corner_offset, 1)
-            r_range = range(corner_offset, self.board_size + 1)
+            r_range = range(corner_offset, self.state.board_size + 1)
         elif side == "southeast":
             # Bottom-right corner: positive q, positive r, but s must be valid
             # For corner, want q ≈ board_size, r ≈ 0 (bottom edge)
-            q_range = range(corner_offset, self.board_size + 1)
+            q_range = range(corner_offset, self.state.board_size + 1)
             r_range = range(-corner_offset, 1)
         else:
             # Fallback for legacy left/right positions (shouldn't be used)
             if side == "left":
-                q_range = range(-self.board_size, -corner_offset)
+                q_range = range(-self.state.board_size, -corner_offset)
                 r_range = range(-corner_offset//2, corner_offset//2 + 1)
             else:  # right
-                q_range = range(corner_offset, self.board_size + 1)
+                q_range = range(corner_offset, self.state.board_size + 1)
                 r_range = range(-corner_offset//2, corner_offset//2 + 1)
         
         # Find all suitable hexes (clear or forest terrain) in the focused area
         candidates = []
         for q in q_range:
             for r in r_range:
-                if (q, r) in self.hex_tiles:
-                    hex_tile = self.hex_tiles[(q, r)]
+                if (q, r) in self.state.hex_tiles:
+                    hex_tile = self.state.hex_tiles[(q, r)]
                     # Only allow clear terrain or forests for starting positions
                     if hex_tile.terrain_type in ["clear", "forest"]:
                         candidates.append((q, r))
@@ -508,9 +474,9 @@ F2 - Show performance stats"""
             
             selected = []
             # Set minimum distance between mechs based on proximity setting
-            if self.initial_proximity == "close":
+            if self.state.initial_proximity == "close":
                 min_distance = 1  # Mechs can be adjacent for close formation
-            elif self.initial_proximity == "far":
+            elif self.state.initial_proximity == "far":
                 min_distance = 3  # Larger spacing for far formation
             else:  # medium
                 min_distance = 2  # Standard spacing
@@ -524,7 +490,7 @@ F2 - Show performance stats"""
                     # Check if this position has reasonable spacing
                     too_close = False
                     for selected_pos in selected:
-                        distance = self.hex_tiles[candidate].distance_to(self.hex_tiles[selected_pos])
+                        distance = self.state.hex_tiles[candidate].distance_to(self.state.hex_tiles[selected_pos])
                         if distance < min_distance:
                             too_close = True
                             break
@@ -566,8 +532,8 @@ F2 - Show performance stats"""
             for pos in fallback_positions:
                 if len(suitable_positions) >= num_mechs:
                     break
-                if pos in self.hex_tiles and pos not in suitable_positions:
-                    hex_tile = self.hex_tiles[pos]
+                if pos in self.state.hex_tiles and pos not in suitable_positions:
+                    hex_tile = self.state.hex_tiles[pos]
                     # Accept any passable terrain in fallback (not just clear/forest)
                     if hex_tile.terrain_type != "deep_water" and hex_tile.terrain_type != "mountain":
                         suitable_positions.append(pos)
@@ -586,7 +552,7 @@ F2 - Show performance stats"""
                 suitable_positions = [(0, 3), (1, 3), (-1, 2), (1, 2)]
             
             # Filter to only existing positions
-            suitable_positions = [pos for pos in suitable_positions if pos in self.hex_tiles]
+            suitable_positions = [pos for pos in suitable_positions if pos in self.state.hex_tiles]
         
         return suitable_positions[:num_mechs]
     
@@ -751,7 +717,7 @@ F2 - Show performance stats"""
         
         # Update visual effects using renderer
         try:
-            self.animation_renderer.update_animation_effects(self.animations, self.selected_mech)
+            self.animation_renderer.update_animation_effects(self.animations, self.state.selected_mech)
         except Exception as e:
             print(f"Warning: Animation effects update failed: {e}")
         
@@ -855,8 +821,8 @@ F2 - Show performance stats"""
         q, r = self.pixel_to_hex(event.x, event.y)
         
         # Check if there's a mech at this hex
-        if (q, r) in self.hex_tiles:
-            hex_tile = self.hex_tiles[(q, r)]
+        if (q, r) in self.state.hex_tiles:
+            hex_tile = self.state.hex_tiles[(q, r)]
             if hex_tile.mech and not hex_tile.mech.is_destroyed():
                 mech = hex_tile.mech
                 
@@ -914,12 +880,12 @@ F2 - Show performance stats"""
     
     def has_line_of_sight(self, from_hex: HexTile, to_hex: HexTile) -> tuple[bool, int]:
         """Check line of sight between two hexes"""
-        return hex_utils.has_line_of_sight(from_hex, to_hex, self.hex_tiles)
+        return hex_utils.has_line_of_sight(from_hex, to_hex, self.state.hex_tiles)
     
     def calculate_reachable_hexes(self, from_hex: HexTile, max_movement: int) -> Dict[Tuple[int, int], int]:
         """Calculate reachable hexes with movement costs"""
-        return hex_utils.calculate_reachable_hexes(from_hex, max_movement, self.hex_tiles, 
-                                                     self.selected_mech if hasattr(self, 'selected_mech') else None)
+        return hex_utils.calculate_reachable_hexes(from_hex, max_movement, self.state.hex_tiles, 
+                                                     self.state.selected_mech)
     
     def show_game_setup(self):
         """Show the game setup screen using modular GameSetupScreen"""
@@ -935,16 +901,16 @@ F2 - Show performance stats"""
     def _on_setup_complete(self, config: dict):
         """Handle setup completion with configuration"""
         # Update game configuration from setup
-        self.num_players = config['num_players']
-        self.ai_action_speed = config['ai_speed']
-        self.initial_proximity = config['proximity']
+        self.state.num_players = config['num_players']
+        self.state.ai_action_speed = config['ai_speed']
+        self.state.initial_proximity = config['proximity']
         
         # Update player configurations
         player_colors = ["#FF073A", "#00D9FF", "#BC13FE", "#FFFF00"]
         for i, player_config in enumerate(config['players']):
-            self.players[i]['name'] = player_config['name']
-            self.players[i]['is_ai'] = player_config['is_ai']
-            self.players[i]['color'] = player_colors[i]
+            self.state.players[i]['name'] = player_config['name']
+            self.state.players[i]['is_ai'] = player_config['is_ai']
+            self.state.players[i]['color'] = player_colors[i]
         
         # Start the game
         self.start_game_from_setup(self.setup_window)
@@ -998,9 +964,9 @@ F2 - Show performance stats"""
             
             # Log initial deployment
             self.log("=== MISSION DEPLOYMENT ===")
-            for player_id in range(1, self.num_players + 1):
-                player_mechs = [m for m in self.mechs if m.player_id == player_id]
-                player_name = self.players[player_id - 1]["name"]
+            for player_id in range(1, self.state.num_players + 1):
+                player_mechs = [m for m in self.state.mechs if m.player_id == player_id]
+                player_name = self.state.players[player_id - 1]["name"]
                 
                 self.log(f"{player_name} Force:")
                 for mech in player_mechs:
@@ -1013,10 +979,10 @@ F2 - Show performance stats"""
             self.initialize_first_turn()
             
             # Calculate initiative and start game
-            self.initiative_order = self.calculate_initiative_order()
+            self.state.update_initiative_order()
             self.activate_next_mech()
             
-            self.game_initialized = True
+            self.state.game_initialized = True
             
             # Bind window events after everything is set up
             self.root.bind('<Configure>', self.on_window_configure)
@@ -1059,7 +1025,7 @@ F2 - Show performance stats"""
             return []
         
         targets = []
-        for mech in self.mechs:
+        for mech in self.state.mechs:
             if mech.player_id != attacking_mech.player_id and not mech.is_destroyed():
                 distance = attacking_mech.hex_tile.distance_to(mech.hex_tile)
                 
@@ -1108,39 +1074,39 @@ F2 - Show performance stats"""
         max_r = int((bottom_right_y - self.canvas_height/2) / (self.hex_size * math.sqrt(3))) + visible_margin
         
         # Clamp to actual board bounds
-        min_q = max(min_q, -self.board_size)
-        max_q = min(max_q, self.board_size)
-        min_r = max(min_r, -self.board_size)
-        max_r = min(max_r, self.board_size)
+        min_q = max(min_q, -self.state.board_size)
+        max_q = min(max_q, self.state.board_size)
+        min_r = max(min_r, -self.state.board_size)
+        max_r = min(max_r, self.state.board_size)
         
         # Draw visible hex tiles
         for q in range(min_q, max_q + 1):
             for r in range(min_r, max_r + 1):
-                if (q, r) in self.hex_tiles:
-                    self.draw_hex(self.hex_tiles[(q, r)])
+                if (q, r) in self.state.hex_tiles:
+                    self.draw_hex(self.state.hex_tiles[(q, r)])
         
         # Always draw ALL mechs to ensure they're visible
-        for mech in self.mechs:
+        for mech in self.state.mechs:
             if not mech.is_destroyed():
                 self.draw_mech(mech)
         
         # Highlight movement range when mech is selected and can still move
-        if self.selected_mech and self.selected_mech.can_still_move():
+        if self.state.selected_mech and self.state.selected_mech.can_still_move():
             self.highlight_movement_range()
         
         # Highlight enemies in range when mech is selected and in attack phase
-        if (self.selected_mech and 
-            self.selected_mech.current_phase == MechPhase.ATTACK and 
-            not self.selected_mech.has_fired):
+        if (self.state.selected_mech and 
+            self.state.selected_mech.current_phase == MechPhase.ATTACK and 
+            not self.state.selected_mech.has_fired):
             self.highlight_enemies_in_range()
         
         # Highlight targeted mech with enhanced targeting graphics
-        if hasattr(self, 'target_mech') and self.target_mech and self.selected_mech:
+        if self.state.target_mech and self.state.selected_mech:
             # Draw enhanced targeting line
-            self.draw_targeting_line(self.selected_mech, self.target_mech)
+            self.draw_targeting_line(self.state.selected_mech, self.state.target_mech)
             
             # Draw enhanced targeting reticle
-            x, y = self.hex_to_pixel(self.target_mech.hex_tile.q, self.target_mech.hex_tile.r)
+            x, y = self.hex_to_pixel(self.state.target_mech.hex_tile.q, self.state.target_mech.hex_tile.r)
             
             # Animated targeting circles
             for i, radius in enumerate([25, 30, 35]):
@@ -1158,7 +1124,7 @@ F2 - Show performance stats"""
                                   font=("Arial", 8, "bold"), fill="white")
         
         # Highlight selected mech's movement range
-        if self.selected_mech and self.selected_mech.can_still_move():
+        if self.state.selected_mech and self.state.selected_mech.can_still_move():
             self.highlight_movement_range()
     
     def draw_hex(self, hex_tile: HexTile):
@@ -1193,8 +1159,8 @@ F2 - Show performance stats"""
         
         # Draw mech as a circle
         radius = 15
-        outline_color = "gold" if mech == self.selected_mech else "black"
-        outline_width = 3 if mech == self.selected_mech else 2
+        outline_color = "gold" if mech == self.state.selected_mech else "black"
+        outline_width = 3 if mech == self.state.selected_mech else 2
         
         if mech.is_destroyed():
             fill_color = "gray"
@@ -1332,8 +1298,8 @@ F2 - Show performance stats"""
             intermediate_hexes = line_hexes[1:-1]  # Exclude source and target
             
             for hex_coord in intermediate_hexes:
-                if hex_coord in self.hex_tiles:
-                    hex_tile = self.hex_tiles[hex_coord]
+                if hex_coord in self.state.hex_tiles:
+                    hex_tile = self.state.hex_tiles[hex_coord]
                     
                     if hex_tile.terrain_type == "mountain":
                         # Blocked LOS indicator
@@ -1365,18 +1331,8 @@ F2 - Show performance stats"""
         # Silent if UI isn't set up yet
     
     def calculate_initiative_order(self) -> List[Mech]:
-        """Calculate initiative order for mechs - alive mechs first, then destroyed mechs"""
-        alive_mechs = [mech for mech in self.mechs if not mech.is_destroyed()]
-        destroyed_mechs = [mech for mech in self.mechs if mech.is_destroyed()]
-        
-        # Sort alive mechs by speed (faster first)
-        alive_sorted = sorted(alive_mechs, key=lambda m: m.stats.speed, reverse=True)
-        
-        # Sort destroyed mechs by speed as well for consistency
-        destroyed_sorted = sorted(destroyed_mechs, key=lambda m: m.stats.speed, reverse=True)
-        
-        # Return alive mechs first, then destroyed mechs
-        return alive_sorted + destroyed_sorted
+        """Calculate initiative order for mechs - delegates to state manager"""
+        return self.state.calculate_initiative_order()
     
     def update_initiative_display(self):
         """Update the initiative display panel"""
@@ -1389,11 +1345,11 @@ F2 - Show performance stats"""
             widget.destroy()
         
         # Show current initiative order
-        alive_count = len([m for m in self.initiative_order if not m.is_destroyed()])
+        alive_count = len([m for m in self.state.initiative_order if not m.is_destroyed()])
         
-        for i, mech in enumerate(self.initiative_order):
+        for i, mech in enumerate(self.state.initiative_order):
             # Determine if this is the active mech
-            is_active = (i == self.current_mech_index and not mech.is_destroyed())
+            is_active = (i == self.state.current_mech_index and not mech.is_destroyed())
             
             # Set colors based on mech status
             if mech.is_destroyed():
@@ -1431,27 +1387,26 @@ F2 - Show performance stats"""
     def activate_next_mech(self):
         """Activate the next mech in initiative order"""
         # Skip destroyed mechs in activation
-        while (self.current_mech_index < len(self.initiative_order) and 
-               self.initiative_order[self.current_mech_index].is_destroyed()):
-            self.current_mech_index += 1
+        while (self.state.current_mech_index < len(self.state.initiative_order) and 
+               self.state.initiative_order[self.state.current_mech_index].is_destroyed()):
+            self.state.current_mech_index += 1
             
-        if self.current_mech_index < len(self.initiative_order):
-            current_mech = self.initiative_order[self.current_mech_index]
+        if self.state.current_mech_index < len(self.state.initiative_order):
+            current_mech = self.state.initiative_order[self.state.current_mech_index]
             self.current_mech_label.config(text=f"Active: {current_mech.stats.name} (Player {current_mech.player_id})")
             
             # Clear previous selection and targeting
-            if hasattr(self, 'target_mech'):
-                delattr(self, 'target_mech')
+            self.state.set_target(None)
             
             # Check if current mech belongs to an AI player
-            player_info = self.players[current_mech.player_id - 1]
+            player_info = self.state.players[current_mech.player_id - 1]
             is_ai_player = player_info["is_ai"]
             
             if is_ai_player:
                 # AI turn for any AI player - enforce AI action speed consistently
-                if self.selected_mech:
-                    self.stop_pulse_animation(self.selected_mech)
-                self.selected_mech = current_mech
+                if self.state.selected_mech:
+                    self.stop_pulse_animation(self.state.selected_mech)
+                self.state.select_mech(current_mech)
                 self.start_pulse_animation(current_mech)
                 player_name = player_info["name"]
                 self.log(f"AI {player_name}: {current_mech.stats.name}'s turn")
@@ -1459,9 +1414,9 @@ F2 - Show performance stats"""
                 self.schedule_ai_action(lambda: self.ai_turn(current_mech))
             else:
                 # Human player turn - no delay needed
-                if self.selected_mech:
-                    self.stop_pulse_animation(self.selected_mech)
-                self.selected_mech = current_mech
+                if self.state.selected_mech:
+                    self.stop_pulse_animation(self.state.selected_mech)
+                self.state.select_mech(current_mech)
                 self.start_pulse_animation(current_mech)
                 player_name = player_info["name"]
                 self.log(f"{player_name}: {current_mech.stats.name}'s turn")
@@ -1471,7 +1426,7 @@ F2 - Show performance stats"""
     def schedule_ai_action(self, action_func, delay_multiplier: float = 1.0):
         """Helper method to consistently apply AI action speed to any AI action"""
         if self.root:
-            delay_ms = int(self.ai_action_speed * delay_multiplier * 1000)
+            delay_ms = int(self.state.ai_action_speed * delay_multiplier * 1000)
             self.root.after(delay_ms, action_func)
         else:
             # Fallback for testing without UI
@@ -1484,7 +1439,7 @@ F2 - Show performance stats"""
             return
             
         # Find enemies (mechs from all other players)
-        enemies = [m for m in self.mechs if m.player_id != mech.player_id and not m.is_destroyed()]
+        enemies = [m for m in self.state.mechs if m.player_id != mech.player_id and not m.is_destroyed()]
         if not enemies:
             self.end_turn()
             return
@@ -1495,7 +1450,7 @@ F2 - Show performance stats"""
         if mech.current_phase == MechPhase.MOVEMENT:
             best_position = self.ai_find_optimal_position(mech, enemies)
             if best_position:
-                target_hex = self.hex_tiles[best_position]
+                target_hex = self.state.hex_tiles[best_position]
                 reachable = self.calculate_reachable_hexes(mech.hex_tile, mech.get_remaining_movement())
                 if best_position in reachable:
                     move_cost = reachable[best_position]
@@ -1547,8 +1502,8 @@ F2 - Show performance stats"""
             if (q, r) == current_position:
                 continue  # Skip current position
                 
-            if (q, r) in self.hex_tiles:
-                hex_tile = self.hex_tiles[(q, r)]
+            if (q, r) in self.state.hex_tiles:
+                hex_tile = self.state.hex_tiles[(q, r)]
                 if hex_tile.mech:  # Occupied
                     continue
                     
@@ -1631,7 +1586,7 @@ F2 - Show performance stats"""
                 score += 25  # Defensive bonus
             
             # Avoid clustering with friendly mechs
-            for friendly in self.mechs:
+            for friendly in self.state.mechs:
                 if friendly.player_id == mech.player_id and not friendly.is_destroyed() and friendly != mech:
                     friendly_distance = position.distance_to(friendly.hex_tile)
                     if friendly_distance <= 2:
@@ -1727,34 +1682,32 @@ F2 - Show performance stats"""
             return
         
         # Validate coordinates before proceeding
-        if not self._validate_hex_coordinates(q, r) or (q, r) not in self.hex_tiles:
+        if not self._validate_hex_coordinates(q, r) or (q, r) not in self.state.hex_tiles:
             return
         
-        clicked_hex = self.hex_tiles[(q, r)]
+        clicked_hex = self.state.hex_tiles[(q, r)]
         
         # Check if clicked on a mech
         if clicked_hex.mech:
             clicked_mech = clicked_hex.mech
             
             # Check if it's a human player's mech that can be selected
-            player_info = self.players[clicked_mech.player_id - 1]
+            player_info = self.state.players[clicked_mech.player_id - 1]
             if not player_info["is_ai"]:  # Human player mech
                 # Check if it's this mech's turn
                 can_select = True
-                if (hasattr(self, 'initiative_order') and 
-                    hasattr(self, 'current_mech_index') and 
-                    self.current_mech_index < len(self.initiative_order)):
-                    active_mech = self.initiative_order[self.current_mech_index]
-                    active_player_info = self.players[active_mech.player_id - 1]
+                if self.state.current_mech_index < len(self.state.initiative_order):
+                    active_mech = self.state.initiative_order[self.state.current_mech_index]
+                    active_player_info = self.state.players[active_mech.player_id - 1]
                     
                     if clicked_mech != active_mech and not active_player_info["is_ai"]:
                         self.log(f"It's {active_mech.stats.name}'s turn, not {clicked_mech.stats.name}'s turn!")
                         can_select = False
                 
                 if can_select:
-                    old_selected = self.selected_mech
-                    if self.selected_mech == clicked_mech:
-                        self.selected_mech = None  # Deselect
+                    old_selected = self.state.selected_mech
+                    if self.state.selected_mech == clicked_mech:
+                        self.state.select_mech(None)  # Deselect
                         # Stop pulse animation for deselected mech
                         if old_selected:
                             self.stop_pulse_animation(old_selected)
@@ -1762,39 +1715,33 @@ F2 - Show performance stats"""
                         # Stop pulse animation for previously selected mech
                         if old_selected:
                             self.stop_pulse_animation(old_selected)
-                        self.selected_mech = clicked_mech
+                        self.state.select_mech(clicked_mech)
                         # Start pulse animation for newly selected mech
                         self.start_pulse_animation(clicked_mech)
-                    if hasattr(self, 'target_mech'):
-                        delattr(self, 'target_mech')
             else:  # Enemy mech or AI mech - set as target if valid
-                if self.selected_mech:
-                    selected_player_info = self.players[self.selected_mech.player_id - 1]
-                    if not selected_player_info["is_ai"] and clicked_mech.player_id != self.selected_mech.player_id:
+                if self.state.selected_mech:
+                    selected_player_info = self.state.players[self.state.selected_mech.player_id - 1]
+                    if not selected_player_info["is_ai"] and clicked_mech.player_id != self.state.selected_mech.player_id:
                         # Check if selected mech is active
-                        if (hasattr(self, 'initiative_order') and 
-                            hasattr(self, 'current_mech_index') and 
-                            self.current_mech_index < len(self.initiative_order)):
-                            active_mech = self.initiative_order[self.current_mech_index]
-                            if self.selected_mech == active_mech:
-                                self.target_mech = clicked_mech
+                        if self.state.current_mech_index < len(self.state.initiative_order):
+                            active_mech = self.state.initiative_order[self.state.current_mech_index]
+                            if self.state.selected_mech == active_mech:
+                                self.state.set_target(clicked_mech)
                             else:
                                 self.log(f"It's {active_mech.stats.name}'s turn to attack!")
                         else:
-                            self.target_mech = clicked_mech
+                            self.state.set_target(clicked_mech)
         else:
             # Clicked on empty hex - try to move selected mech
-            if self.selected_mech:
-                selected_player_info = self.players[self.selected_mech.player_id - 1]
+            if self.state.selected_mech:
+                selected_player_info = self.state.players[self.state.selected_mech.player_id - 1]
                 if not selected_player_info["is_ai"]:  # Only human players can move manually
                     
                     # Check if it's the selected mech's turn and they're in movement phase
-                    if (hasattr(self, 'initiative_order') and 
-                        hasattr(self, 'current_mech_index') and 
-                        self.current_mech_index < len(self.initiative_order)):
-                        active_mech = self.initiative_order[self.current_mech_index]
-                        if self.selected_mech != active_mech:
-                            self.log(f"It's {active_mech.stats.name}'s turn, not {self.selected_mech.stats.name}'s turn!")
+                    if self.state.current_mech_index < len(self.state.initiative_order):
+                        active_mech = self.state.initiative_order[self.state.current_mech_index]
+                        if self.state.selected_mech != active_mech:
+                            self.log(f"It's {active_mech.stats.name}'s turn, not {self.state.selected_mech.stats.name}'s turn!")
                             self.update_display()
                             return
                         if active_mech.current_phase != MechPhase.MOVEMENT:
@@ -1807,21 +1754,21 @@ F2 - Show performance stats"""
                             return
                 
                 # Use pathfinding to check if hex is reachable with remaining movement
-                remaining_movement = self.selected_mech.get_remaining_movement()
-                reachable = self.calculate_reachable_hexes(self.selected_mech.hex_tile, remaining_movement)
+                remaining_movement = self.state.selected_mech.get_remaining_movement()
+                reachable = self.calculate_reachable_hexes(self.state.selected_mech.hex_tile, remaining_movement)
                 target_coords = (q, r)
                 
                 if target_coords in reachable:
                     move_cost = reachable[target_coords]
                     try:
-                        if self.selected_mech.move_to(clicked_hex, move_cost):
-                            remaining_after_move = self.selected_mech.get_remaining_movement()
-                            self.log(f"{self.selected_mech.stats.name} moves to ({q}, {r}) [Cost: {move_cost}, Remaining: {remaining_after_move}]")
+                        if self.state.selected_mech.move_to(clicked_hex, move_cost):
+                            remaining_after_move = self.state.selected_mech.get_remaining_movement()
+                            self.log(f"{self.state.selected_mech.stats.name} moves to ({q}, {r}) [Cost: {move_cost}, Remaining: {remaining_after_move}]")
                             
                             # Check if movement is exhausted and auto-advance to attack phase
-                            if remaining_after_move <= 0 or not self.selected_mech.can_still_move():
-                                self.log(f"{self.selected_mech.stats.name} has used all movement - advancing to attack phase")
-                                self.selected_mech.end_movement_phase()
+                            if remaining_after_move <= 0 or not self.state.selected_mech.can_still_move():
+                                self.log(f"{self.state.selected_mech.stats.name} has used all movement - advancing to attack phase")
+                                self.state.selected_mech.end_movement_phase()
                                 self.update_attack_buttons()
                             
                             # Always update display to recalculate movement indicators
@@ -1837,8 +1784,8 @@ F2 - Show performance stats"""
                         messagebox.showerror("Game Error", str(e))
                 else:
                     self.log(f"Cannot reach ({q}, {r}) - out of movement range or blocked")
-            elif self.selected_mech:
-                selected_player_info = self.players[self.selected_mech.player_id - 1]
+            elif self.state.selected_mech:
+                selected_player_info = self.state.players[self.state.selected_mech.player_id - 1]
                 if selected_player_info["is_ai"]:
                     self.log("You cannot move AI mechs")
         
@@ -1851,12 +1798,12 @@ F2 - Show performance stats"""
             return
             
         # Mark all visible hexes as dirty to ensure complete redraw when needed
-        if hasattr(self, 'selected_mech') and self.selected_mech:
+        if self.state.selected_mech:
             # Mark area around selected mech as dirty
             for dq in range(-2, 3):
                 for dr in range(-2, 3):
-                    self._mark_hex_dirty(self.selected_mech.hex_tile.q + dq, 
-                                       self.selected_mech.hex_tile.r + dr)
+                    self._mark_hex_dirty(self.state.selected_mech.hex_tile.q + dq, 
+                                       self.state.selected_mech.hex_tile.r + dr)
         
         # Clear any previous movement range indicators
         self.canvas.delete("movement_range")
@@ -1876,8 +1823,8 @@ F2 - Show performance stats"""
         for widget in self.mech_info_frame.winfo_children():
             widget.destroy()
         
-        if self.selected_mech:
-            mech = self.selected_mech
+        if self.state.selected_mech:
+            mech = self.state.selected_mech
             info_text = f"{mech.stats.name} (Player {mech.player_id})\n"
             info_text += f"Speed: {mech.stats.speed}, Armor: {mech.stats.armor_hp}/{mech.stats.max_armor_hp}\n"
             info_text += f"Structure: {mech.stats.structure_hp}/{mech.stats.max_structure_hp}\n"
@@ -1914,18 +1861,18 @@ F2 - Show performance stats"""
         for widget in self.target_info_frame.winfo_children():
             widget.destroy()
         
-        if hasattr(self, 'target_mech') and self.target_mech:
-            target = self.target_mech
+        if self.state.target_mech:
+            target = self.state.target_mech
             target_text = f"{target.stats.name} (Player {target.player_id})\n"
             target_text += f"Armor: {target.stats.armor_hp}/{target.stats.max_armor_hp}\n"
             target_text += f"Structure: {target.stats.structure_hp}/{target.stats.max_structure_hp}\n"
             
-            if self.selected_mech:
-                distance = self.selected_mech.hex_tile.distance_to(target.hex_tile)
+            if self.state.selected_mech:
+                distance = self.state.selected_mech.hex_tile.distance_to(target.hex_tile)
                 target_text += f"Range: {distance} hexes\n"
                 
                 # Check line of sight
-                has_los, range_modifier = self.has_line_of_sight(self.selected_mech.hex_tile, target.hex_tile)
+                has_los, range_modifier = self.has_line_of_sight(self.state.selected_mech.hex_tile, target.hex_tile)
                 los_text = "Clear" if has_los else "Blocked"
                 target_text += f"Line of Sight: {los_text}\n"
                 
@@ -1958,55 +1905,55 @@ F2 - Show performance stats"""
     
     def can_laser_attack_target(self) -> bool:
         """Check if selected mech can laser attack the current target"""
-        if not (self.selected_mech and hasattr(self, 'target_mech') and self.target_mech):
+        if not (self.state.selected_mech and self.state.target_mech):
             return False
         
         # Check basic attack conditions
-        if (self.selected_mech.has_fired or 
-            not self.selected_mech.can_attack(self.target_mech) or
-            self.selected_mech.current_phase != MechPhase.ATTACK):
+        if (self.state.selected_mech.has_fired or 
+            not self.state.selected_mech.can_attack(self.state.target_mech) or
+            self.state.selected_mech.current_phase != MechPhase.ATTACK):
             return False
         
         # Check laser range (8 hexes)
-        distance = self.selected_mech.hex_tile.distance_to(self.target_mech.hex_tile)
+        distance = self.state.selected_mech.hex_tile.distance_to(self.state.target_mech.hex_tile)
         if distance > 8:
             return False
         
         # Check line of sight
-        has_los, _ = self.has_line_of_sight(self.selected_mech.hex_tile, self.target_mech.hex_tile)
+        has_los, _ = self.has_line_of_sight(self.state.selected_mech.hex_tile, self.state.target_mech.hex_tile)
         return has_los
     
     def can_missile_attack_target(self) -> bool:
         """Check if selected mech can missile attack the current target"""
-        if not (self.selected_mech and hasattr(self, 'target_mech') and self.target_mech):
+        if not (self.state.selected_mech and self.state.target_mech):
             return False
         
         # Check basic attack conditions
-        if (self.selected_mech.has_fired or 
-            not self.selected_mech.can_attack(self.target_mech) or
-            self.selected_mech.current_phase != MechPhase.ATTACK):
+        if (self.state.selected_mech.has_fired or 
+            not self.state.selected_mech.can_attack(self.state.target_mech) or
+            self.state.selected_mech.current_phase != MechPhase.ATTACK):
             return False
         
         # Check missile range (12 hexes)
-        distance = self.selected_mech.hex_tile.distance_to(self.target_mech.hex_tile)
+        distance = self.state.selected_mech.hex_tile.distance_to(self.state.target_mech.hex_tile)
         if distance > 12:
             return False
         
         # Check line of sight
-        has_los, _ = self.has_line_of_sight(self.selected_mech.hex_tile, self.target_mech.hex_tile)
+        has_los, _ = self.has_line_of_sight(self.state.selected_mech.hex_tile, self.state.target_mech.hex_tile)
         return has_los
     
     def get_laser_hit_chance(self) -> float:
         """Get hit chance for laser attack against current target"""
-        if not (self.selected_mech and hasattr(self, 'target_mech') and self.target_mech):
+        if not (self.state.selected_mech and self.state.target_mech):
             return 0.0
-        return self.selected_mech.calculate_hit_chance(self.target_mech, "laser")
+        return self.state.selected_mech.calculate_hit_chance(self.state.target_mech, "laser")
     
     def get_missile_hit_chance(self) -> float:
         """Get hit chance for missile attack against current target"""
-        if not (self.selected_mech and hasattr(self, 'target_mech') and self.target_mech):
+        if not (self.state.selected_mech and self.state.target_mech):
             return 0.0
-        return self.selected_mech.calculate_hit_chance(self.target_mech, "missile")
+        return self.state.selected_mech.calculate_hit_chance(self.state.target_mech, "missile")
     
     def update_attack_buttons(self):
         """Update attack button states"""
@@ -2018,11 +1965,9 @@ F2 - Show performance stats"""
         
         # Check if it's the selected mech's turn for attack buttons
         is_active_mech = False
-        if (hasattr(self, 'initiative_order') and 
-            hasattr(self, 'current_mech_index') and 
-            self.current_mech_index < len(self.initiative_order)):
-            active_mech = self.initiative_order[self.current_mech_index]
-            is_active_mech = (self.selected_mech == active_mech)
+        if self.state.current_mech_index < len(self.state.initiative_order):
+            active_mech = self.state.initiative_order[self.state.current_mech_index]
+            is_active_mech = (self.state.selected_mech == active_mech)
             can_end_movement = (active_mech.current_phase == MechPhase.MOVEMENT)
         
         # Check weapon-specific attack conditions
@@ -2049,88 +1994,84 @@ F2 - Show performance stats"""
     
     def laser_attack(self):
         """Perform laser attack"""
-        if self.selected_mech and hasattr(self, 'target_mech') and self.target_mech:
+        if self.state.selected_mech and self.state.target_mech:
             # Verify it's the selected mech's turn and they're in attack phase
-            if (hasattr(self, 'initiative_order') and 
-                hasattr(self, 'current_mech_index') and 
-                self.current_mech_index < len(self.initiative_order)):
-                active_mech = self.initiative_order[self.current_mech_index]
-                if self.selected_mech != active_mech:
-                    self.log(f"It's {active_mech.stats.name}'s turn, not {self.selected_mech.stats.name}'s turn!")
+            if self.state.current_mech_index < len(self.state.initiative_order):
+                active_mech = self.state.initiative_order[self.state.current_mech_index]
+                if self.state.selected_mech != active_mech:
+                    self.log(f"It's {active_mech.stats.name}'s turn, not {self.state.selected_mech.stats.name}'s turn!")
                     return
                 if active_mech.current_phase != MechPhase.ATTACK:
                     self.log(f"{active_mech.stats.name} must finish movement before attacking!")
                     return
             
-            result = self.selected_mech.attack(self.target_mech, "laser")
-            self.log(f"{self.selected_mech.stats.name} laser attack: {result['message']}")
+            result = self.state.selected_mech.attack(self.state.target_mech, "laser")
+            self.log(f"{self.state.selected_mech.stats.name} laser attack: {result['message']}")
             
             # Start weapon animation
-            self.start_weapon_animation("laser", self.selected_mech.hex_tile, self.target_mech.hex_tile)
+            self.start_weapon_animation("laser", self.state.selected_mech.hex_tile, self.state.target_mech.hex_tile)
             
             # Start explosion animation based on result
             if result['hit']:
-                hit_type = "destroy" if self.target_mech.is_destroyed() else "hit"
-                self.start_explosion_animation(self.target_mech.hex_tile, hit_type)
+                hit_type = "destroy" if self.state.target_mech.is_destroyed() else "hit"
+                self.start_explosion_animation(self.state.target_mech.hex_tile, hit_type)
             else:
-                self.start_explosion_animation(self.target_mech.hex_tile, "miss")
+                self.start_explosion_animation(self.state.target_mech.hex_tile, "miss")
             
-            if self.target_mech.is_destroyed():
-                self.log(f"{self.target_mech.stats.name} is destroyed!")
-                delattr(self, 'target_mech')
+            if self.state.target_mech.is_destroyed():
+                self.log(f"{self.state.target_mech.stats.name} is destroyed!")
+                self.state.set_target(None)
             
             self.check_victory()
             
             # End attack phase and complete turn after firing
-            self.selected_mech.end_attack_phase()
-            self.log(f"{self.selected_mech.stats.name} has completed their turn")
+            self.state.selected_mech.end_attack_phase()
+            self.log(f"{self.state.selected_mech.stats.name} has completed their turn")
             self.end_turn()
     
     def missile_attack(self):
         """Perform missile attack"""
-        if self.selected_mech and hasattr(self, 'target_mech') and self.target_mech:
+        if self.state.selected_mech and self.state.target_mech:
             # Verify it's the selected mech's turn and they're in attack phase
-            if (hasattr(self, 'initiative_order') and 
-                hasattr(self, 'current_mech_index') and 
-                self.current_mech_index < len(self.initiative_order)):
-                active_mech = self.initiative_order[self.current_mech_index]
-                if self.selected_mech != active_mech:
-                    self.log(f"It's {active_mech.stats.name}'s turn, not {self.selected_mech.stats.name}'s turn!")
+            if self.state.current_mech_index < len(self.state.initiative_order):
+                active_mech = self.state.initiative_order[self.state.current_mech_index]
+                if self.state.selected_mech != active_mech:
+                    self.log(f"It's {active_mech.stats.name}'s turn, not {self.state.selected_mech.stats.name}'s turn!")
                     return
                 if active_mech.current_phase != MechPhase.ATTACK:
                     self.log(f"{active_mech.stats.name} must finish movement before attacking!")
                     return
             
-            result = self.selected_mech.attack(self.target_mech, "missile")
-            self.log(f"{self.selected_mech.stats.name} missile attack: {result['message']}")
+            result = self.state.selected_mech.attack(self.state.target_mech, "missile")
+            self.log(f"{self.state.selected_mech.stats.name} missile attack: {result['message']}")
             
             # Start weapon animation
-            self.start_weapon_animation("missile", self.selected_mech.hex_tile, self.target_mech.hex_tile)
+            self.start_weapon_animation("missile", self.state.selected_mech.hex_tile, self.state.target_mech.hex_tile)
             
             # Start explosion animation based on result
             if result['hit']:
-                hit_type = "destroy" if self.target_mech.is_destroyed() else "hit"
-                self.start_explosion_animation(self.target_mech.hex_tile, hit_type)
+                hit_type = "destroy" if self.state.target_mech.is_destroyed() else "hit"
+                self.start_explosion_animation(self.state.target_mech.hex_tile, hit_type)
             else:
-                self.start_explosion_animation(self.target_mech.hex_tile, "miss")
+                self.start_explosion_animation(self.state.target_mech.hex_tile, "miss")
             
-            if self.target_mech.is_destroyed():
-                self.log(f"{self.target_mech.stats.name} is destroyed!")
-                delattr(self, 'target_mech')
+            if self.state.target_mech.is_destroyed():
+                self.log(f"{self.state.target_mech.stats.name} is destroyed!")
+                self.state.set_target(None)
             
             self.check_victory()
             
             # End attack phase and complete turn after firing
-            self.selected_mech.end_attack_phase()
-            self.log(f"{self.selected_mech.stats.name} has completed their turn")
+            self.state.selected_mech.end_attack_phase()
+            self.log(f"{self.state.selected_mech.stats.name} has completed their turn")
             self.end_turn()
     
     def end_movement_phase(self):
         """End movement phase for current mech and advance to attack phase"""
-        if self.game_over:
+        if self.state.game_over:
             return
             
-        current_mech = self.initiative_order[self.current_mech_index]
+        current_mech = self.state.initiative_order[self.state.current_mech_index]
         if current_mech.current_phase == MechPhase.MOVEMENT:
             current_mech.end_movement_phase()
             self.update_attack_buttons()
@@ -2139,25 +2080,15 @@ F2 - Show performance stats"""
     def end_turn(self):
         """End current mech's turn"""
         try:
-            if self.game_over:
+            if self.state.game_over:
                 return
                 
-            self.current_mech_index += 1
-            
-            # Clear selection and targeting when turn ends
-            if hasattr(self, 'target_mech'):
-                delattr(self, 'target_mech')
-            
-            # Skip destroyed mechs
-            while (self.current_mech_index < len(self.initiative_order) and 
-                   self.initiative_order[self.current_mech_index].is_destroyed()):
-                self.current_mech_index += 1
-            
-            # Check if we've gone through all mechs or only destroyed mechs remain
-            if (self.current_mech_index >= len(self.initiative_order) or
-                all(m.is_destroyed() for m in self.initiative_order[self.current_mech_index:])):
+            # Use state manager to advance to next mech
+            if not self.state.advance_to_next_mech():
+                # Turn should end
                 self.start_new_turn()
             else:
+                # Continue with next mech
                 self.activate_next_mech()
         except Exception as e:
             messagebox.showerror("Turn Error", f"Error ending turn: {str(e)}")
@@ -2165,49 +2096,39 @@ F2 - Show performance stats"""
     
     def start_new_turn(self):
         """Start a new turn"""
-        if self.game_over:
+        if self.state.game_over:
             return
             
         # Clear AI cache for new turn
         self._clear_ai_cache()
         
-        self.current_turn += 1
-        self.turn_label.config(text=f"Turn {self.current_turn}")
+        # Use state manager to start new turn
+        self.state.start_new_turn()
+        self.turn_label.config(text=f"Turn {self.state.current_turn}")
         
         # Reset all living mechs
-        for mech in self.mechs:
+        for mech in self.state.mechs:
             if not mech.is_destroyed():
                 mech.start_turn()
         
         # Recalculate initiative (include destroyed mechs at bottom)
-        self.initiative_order = self.calculate_initiative_order()
-        self.current_mech_index = 0
-        
-        # Clear selections
-        self.selected_mech = None
-        if hasattr(self, 'target_mech'):
-            delattr(self, 'target_mech')
+        self.state.update_initiative_order()
         
         # Check if any alive mechs remain
-        alive_mechs = [m for m in self.mechs if not m.is_destroyed()]
+        alive_mechs = self.state.get_alive_mechs()
         if not alive_mechs:
             self.log("All mechs destroyed!")
-            self.game_over = True
+            self.state.game_over = True
             return
         
-        self.log(f"=== TURN {self.current_turn} ===")
+        self.log(f"=== TURN {self.state.current_turn} ===")
         self.activate_next_mech()
     
     def check_victory(self):
-        """Check for victory conditions"""
-        # Count players with living mechs
-        players_alive = []
-        for player_id in range(1, self.num_players + 1):
-            if any(m.player_id == player_id and not m.is_destroyed() for m in self.mechs):
-                players_alive.append(player_id)
+        """Check for victory conditions - delegates to state manager"""
+        victory_info = self.state.check_victory()
         
-        # Victory if only one player remains
-        if len(players_alive) <= 1:
+        if victory_info:
             # Clean up animations when game ends
             try:
                 for animation in self.animations:
@@ -2215,16 +2136,10 @@ F2 - Show performance stats"""
                 self.animations.clear()
             except Exception as e:
                 print(f"Warning: Animation cleanup failed during game end: {e}")
-                
-            if len(players_alive) == 1:
-                winner_id = players_alive[0]
-                winner_name = self.players[winner_id - 1]["name"]
-                self.log(f"{winner_name.upper()} WINS!")
-                messagebox.showinfo("Game Over", f"{winner_name} Wins!")
-            else:
-                self.log("DRAW - ALL PLAYERS ELIMINATED!")
-                messagebox.showinfo("Game Over", "Draw - All Players Eliminated!")
-            self.game_over = True
+            
+            # Log and show victory message
+            self.log(victory_info["message"].upper())
+            messagebox.showinfo("Game Over", victory_info["message"])
     
     def show_readme_popup(self):
         """Show help popup with game instructions"""
@@ -2368,13 +2283,13 @@ Good hunting, MechWarrior! The battlefield awaits your command.
     
     def highlight_movement_range(self):
         """Highlight movement range with pathfinding and cost display"""
-        if (not self.selected_mech or 
-            not self.selected_mech.can_still_move()):
+        if (not self.state.selected_mech or 
+            not self.state.selected_mech.can_still_move()):
             return
         
         # Calculate reachable hexes with remaining movement points
-        remaining_movement = self.selected_mech.get_remaining_movement()
-        reachable = self.calculate_reachable_hexes(self.selected_mech.hex_tile, remaining_movement)
+        remaining_movement = self.state.selected_mech.get_remaining_movement()
+        reachable = self.calculate_reachable_hexes(self.state.selected_mech.hex_tile, remaining_movement)
         
         # Draw movement indicators for each reachable hex
         for (q, r), cost in reachable.items():
