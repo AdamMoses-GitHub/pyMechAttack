@@ -24,6 +24,7 @@ import hex_utils
 from animation_renderer import AnimationRenderer
 from game_state import GameState
 from combat_system import CombatSystem
+from ai_controller import AIController
 
 # Import UI modules
 from ui_setup_screen import GameSetupScreen
@@ -46,13 +47,8 @@ class BattleTechGame:
         # Initialize combat system
         self.combat = CombatSystem(self.state, hex_utils)
         
-        # AI names for random selection
-        self.ai_names = [
-            "Commander Steel", "Major Forge", "Captain Titan", "Colonel Storm",
-            "General Viper", "Marshal Kane", "Admiral Rex", "Commander Nova",
-            "Major Blitz", "Captain Razor", "Colonel Frost", "General Phoenix",
-            "Marshal Thunder", "Admiral Hawk", "Commander Bolt", "Major Reaper"
-        ]
+        # Initialize AI controller (will be fully configured after UI setup)
+        self.ai = None  # Created after UI initialization with callbacks
         
         # Validate configuration after initialization
         self._validate_configuration()
@@ -66,14 +62,6 @@ class BattleTechGame:
         self.dirty_hexes = set()  # Track which hexes need redrawing
         self.last_draw_time = 0
         self.draw_times = []  # Track performance
-        
-        # AI decision caching for performance
-        self.ai_cache = {
-            'position_scores': {},
-            'target_evaluations': {},
-            'cache_hits': 0,
-            'cache_misses': 0
-        }
         
         # Animation system
         self.animations = []  # List of active animations
@@ -145,11 +133,6 @@ class BattleTechGame:
         """Mark a hex as needing redraw"""
         if self._validate_hex_coordinates(q, r):
             self.dirty_hexes.add((q, r))
-            
-    def _clear_ai_cache(self):
-        """Clear AI decision cache at start of each turn"""
-        self.ai_cache['position_scores'].clear()
-        self.ai_cache['target_evaluations'].clear()
         
     def _validate_configuration(self):
         """Validate game configuration parameters"""
@@ -236,8 +219,8 @@ class BattleTechGame:
 • Max frame time: {max_frame_time*1000:.1f}ms
 • Active animations: {self.performance_metrics['animation_count']}
 • UI updates: {self.performance_metrics['ui_updates']}
-• Memory cache hits: {self.ai_cache['cache_hits']}
-• Memory cache misses: {self.ai_cache['cache_misses']}
+• AI cache hits: {self.ai.cache['cache_hits'] if self.ai else 0}
+• AI cache misses: {self.ai.cache['cache_misses'] if self.ai else 0}
 
 Hotkeys:
 F1 - Toggle FPS display
@@ -272,7 +255,12 @@ F2 - Show performance stats"""
         # Clear selections
         self.state.clear_selection()
         
+        # Clear AI cache for new turn
+        if self.ai:
+            self.ai.clear_cache()
+        
         self.log(f"=== TURN {self.state.current_turn} ===")
+        self.log("Initial initiative order calculated!")
         self.log("Initial initiative order calculated!")
         
         self.update_initiative_display()
@@ -339,6 +327,18 @@ F2 - Show performance stats"""
             self.target_info_frame, 
             self.instruction_label
         )
+        
+        # Initialize AI controller with UI callbacks
+        ai_callbacks = {
+            'log': self.log,
+            'end_turn': self.end_turn,
+            'update_display': self.update_display,
+            'check_victory': self.check_victory,
+            'schedule_action': self._schedule_ai_action,
+            'calculate_reachable': self.calculate_reachable_hexes,
+            'has_line_of_sight': self.has_line_of_sight
+        }
+        self.ai = AIController(self.state, self.combat, hex_utils, ai_callbacks)
         
         # Update size info when window changes
         self.update_window_size_info()
@@ -891,6 +891,15 @@ F2 - Show performance stats"""
         return hex_utils.calculate_reachable_hexes(from_hex, max_movement, self.state.hex_tiles, 
                                                      self.state.selected_mech)
     
+    def _schedule_ai_action(self, action_func, delay_multiplier: float = 1.0):
+        """Helper method to schedule AI actions with appropriate delay"""
+        if self.root:
+            delay_ms = int(self.state.ai_action_speed * delay_multiplier * 1000)
+            self.root.after(delay_ms, action_func)
+        else:
+            # Fallback for testing without UI
+            action_func()
+    
     def show_game_setup(self):
         """Show the game setup screen using modular GameSetupScreen"""
         # Create setup screen with callbacks
@@ -1393,8 +1402,8 @@ F2 - Show performance stats"""
                 self.start_pulse_animation(current_mech)
                 player_name = player_info["name"]
                 self.log(f"AI {player_name}: {current_mech.stats.name}'s turn")
-                # Always apply AI action speed delay for any AI player
-                self.schedule_ai_action(lambda: self.ai_turn(current_mech))
+                # Delegate to AI controller
+                self.ai.schedule_action(lambda: self.ai.execute_turn(current_mech))
             else:
                 # Human player turn - no delay needed
                 if self.state.selected_mech:
@@ -1405,188 +1414,6 @@ F2 - Show performance stats"""
                 self.log(f"{player_name}: {current_mech.stats.name}'s turn")
         
         self.update_display()
-    
-    def schedule_ai_action(self, action_func, delay_multiplier: float = 1.0):
-        """Helper method to consistently apply AI action speed to any AI action"""
-        if self.root:
-            delay_ms = int(self.state.ai_action_speed * delay_multiplier * 1000)
-            self.root.after(delay_ms, action_func)
-        else:
-            # Fallback for testing without UI
-            action_func()
-    
-    def ai_turn(self, mech: Mech):
-        """Advanced tactical AI for any AI player mech"""
-        if mech.is_destroyed():
-            self.end_turn()
-            return
-            
-        # Find enemies (mechs from all other players)
-        enemies = self.combat.get_enemies_for_mech(mech)
-        if not enemies:
-            self.end_turn()
-            return
-        
-        self.log(f"AI {mech.stats.name} begins turn")
-        
-        # Phase 1: Movement Phase
-        if mech.current_phase == MechPhase.MOVEMENT:
-            best_position = self.ai_find_optimal_position(mech, enemies)
-            if best_position:
-                target_hex = self.state.hex_tiles[best_position]
-                reachable = self.calculate_reachable_hexes(mech.hex_tile, mech.get_remaining_movement())
-                if best_position in reachable:
-                    move_cost = reachable[best_position]
-                    if mech.move_to(target_hex, move_cost):
-                        self.log(f"AI {mech.stats.name} tactically moves to ({best_position[0]}, {best_position[1]}) [Cost: {move_cost}]")
-                        
-                        # Check if should continue moving or advance to attack
-                        if mech.get_remaining_movement() <= 0 or self.ai_should_stop_moving(mech, enemies):
-                            mech.end_movement_phase()
-                            self.log(f"AI {mech.stats.name} ends movement phase")
-                        else:
-                            # Continue movement next update cycle with consistent AI speed
-                            self.schedule_ai_action(lambda: self.ai_turn(mech), 0.5)  # Half speed for movement
-                            return
-                    else:
-                        mech.end_movement_phase()
-                else:
-                    mech.end_movement_phase()
-            else:
-                mech.end_movement_phase()
-        
-        # Phase 2: Attack Phase
-        if mech.current_phase == MechPhase.ATTACK:
-            target, weapon = self.ai_choose_target_and_weapon(mech, enemies)
-            if target and weapon and not mech.has_fired:
-                result = mech.attack(target, weapon)
-                weapon_name = "laser" if weapon == "laser" else "missile"
-                self.log(f"AI {mech.stats.name} {weapon_name} attacks {target.stats.name}: {result['message']}")
-                
-                if target.is_destroyed():
-                    self.log(f"{target.stats.name} is destroyed!")
-                    self.check_victory()
-                
-                mech.end_attack_phase()
-        
-        # End AI turn
-        self.log(f"AI {mech.stats.name} ends turn")
-        self.end_turn()
-    
-    def ai_find_optimal_position(self, mech: Mech, enemies) -> tuple[int, int] | None:
-        """Find the best position for the AI mech to move to"""
-        reachable = self.calculate_reachable_hexes(mech.hex_tile, mech.get_remaining_movement())
-        best_position = None
-        best_score = float('-inf')
-        
-        current_position = (mech.hex_tile.q, mech.hex_tile.r)
-        
-        for (q, r), cost in reachable.items():
-            if (q, r) == current_position:
-                continue  # Skip current position
-                
-            if (q, r) in self.state.hex_tiles:
-                hex_tile = self.state.hex_tiles[(q, r)]
-                if hex_tile.mech:  # Occupied
-                    continue
-                    
-                score = self.ai_evaluate_position(hex_tile, mech, enemies)
-                if score > best_score:
-                    best_score = score
-                    best_position = (q, r)
-        
-        return best_position
-    
-    def ai_evaluate_position(self, position: HexTile, mech: Mech, enemies) -> float:
-        """Evaluate how good a position is for the AI mech with caching"""
-        # Create cache key based on position and enemy positions
-        enemies_hash = hash(tuple((e.hex_tile.q, e.hex_tile.r, e.stats.armor_hp, e.stats.structure_hp) for e in enemies))
-        cache_key = (id(mech), position.q, position.r, enemies_hash)
-        
-        # Check cache first
-        if cache_key in self.ai_cache['position_scores']:
-            self.ai_cache['cache_hits'] += 1
-            return self.ai_cache['position_scores'][cache_key]
-        
-        self.ai_cache['cache_misses'] += 1
-        
-        score = 0.0
-        
-        # Find the best target from this position
-        best_target = None
-        best_target_score = float('-inf')
-        
-        for enemy in enemies:
-            distance = position.distance_to(enemy.hex_tile)
-            
-            # Target prioritization
-            target_score = 0.0
-            
-            # Prefer damaged enemies (easier to destroy)
-            health_ratio = (enemy.stats.armor_hp + enemy.stats.structure_hp) / (enemy.stats.max_armor_hp + enemy.stats.max_structure_hp)
-            target_score += (1.0 - health_ratio) * 100  # Up to 100 points for low health
-            
-            # Prefer closer enemies
-            if distance <= 12:  # In missile range
-                target_score += (12 - distance) * 10  # Closer is better
-            
-            # Prefer enemies we can attack effectively
-            has_los, _ = self.has_line_of_sight(position, enemy.hex_tile)
-            if has_los:
-                if distance <= 8:  # Laser range - preferred
-                    target_score += 50
-                elif distance <= 12:  # Missile range
-                    target_score += 30
-            else:
-                target_score -= 50  # Penalize no line of sight
-            
-            if target_score > best_target_score:
-                best_target_score = target_score
-                best_target = enemy
-        
-        if best_target:
-            distance_to_target = position.distance_to(best_target.hex_tile)
-            
-            # Range considerations
-            if distance_to_target <= 8:
-                score += 60  # Excellent - in laser range
-            elif distance_to_target <= 10:
-                score += 40  # Good - close to laser range
-            elif distance_to_target <= 12:
-                score += 20  # OK - in missile range
-            else:
-                score -= 20  # Poor - out of range
-            
-            # Line of sight bonus
-            has_los, range_modifier = self.has_line_of_sight(position, best_target.hex_tile)
-            if has_los:
-                score += 30
-            else:
-                score -= 40
-            
-            # Cover considerations
-            if position.provides_cover():
-                score += 25  # Defensive bonus
-            
-            # Avoid clustering with friendly mechs
-            for friendly in self.state.mechs:
-                if friendly.player_id == mech.player_id and not friendly.is_destroyed() and friendly != mech:
-                    friendly_distance = position.distance_to(friendly.hex_tile)
-                    if friendly_distance <= 2:
-                        score -= 15  # Penalize clustering
-            
-            # Terrain movement cost penalty
-            score -= position.get_movement_cost() * 2
-        
-        return score
-    
-    def ai_should_stop_moving(self, mech: Mech, enemies) -> bool:
-        """Determine if AI should stop moving and start attacking"""
-        return self.combat.should_ai_stop_moving_for_attack(mech, enemies)
-    
-    def ai_choose_target_and_weapon(self, mech: Mech, enemies) -> tuple[Mech | None, str | None]:
-        """Choose the best target and weapon for attacking"""
-        return self.combat.find_optimal_attack_target(mech, enemies)
     
     def on_canvas_click(self, event):
         """Handle canvas click events"""
@@ -2019,7 +1846,8 @@ F2 - Show performance stats"""
             return
             
         # Clear AI cache for new turn
-        self._clear_ai_cache()
+        if self.ai:
+            self.ai.clear_cache()
         
         # Use state manager to start new turn
         self.state.start_new_turn()
