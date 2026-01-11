@@ -25,6 +25,7 @@ from animation_renderer import AnimationRenderer
 from game_state import GameState
 from combat_system import CombatSystem
 from ai_controller import AIController
+from turn_manager import TurnManager
 
 # Import UI modules
 from ui_setup_screen import GameSetupScreen
@@ -49,6 +50,9 @@ class BattleTechGame:
         
         # Initialize AI controller (will be fully configured after UI setup)
         self.ai = None  # Created after UI initialization with callbacks
+        
+        # Initialize turn manager (will be fully configured after UI setup)
+        self.turn_manager = None  # Created after UI initialization with callbacks
         
         # Validate configuration after initialization
         self._validate_configuration()
@@ -244,27 +248,7 @@ F2 - Show performance stats"""
 
     def initialize_first_turn(self):
         """Initialize the first turn without showing popup immediately"""
-        # Reset all mechs
-        for mech in self.state.mechs:
-            if not mech.is_destroyed():
-                mech.start_turn()
-        
-        # Calculate initial initiative order
-        self.state.update_initiative_order()
-        
-        # Clear selections
-        self.state.clear_selection()
-        
-        # Clear AI cache for new turn
-        if self.ai:
-            self.ai.clear_cache()
-        
-        self.log(f"=== TURN {self.state.current_turn} ===")
-        self.log("Initial initiative order calculated!")
-        self.log("Initial initiative order calculated!")
-        
-        self.update_initiative_display()
-        self.activate_next_mech()
+        self.turn_manager.initialize_first_turn()
         
     def setup_ui(self):
         """Setup the user interface using modular GameWindowUI"""
@@ -339,6 +323,23 @@ F2 - Show performance stats"""
             'has_line_of_sight': self.has_line_of_sight
         }
         self.ai = AIController(self.state, self.combat, hex_utils, ai_callbacks)
+        
+        # Initialize turn manager with callbacks
+        turn_callbacks = {
+            'log': self.log,
+            'on_turn_changed': self._on_turn_changed,
+            'on_mech_activated': self._on_mech_activated,
+            'on_initiative_updated': self._on_initiative_updated,
+            'on_mech_selected': self.start_pulse_animation,
+            'on_mech_deselected': self.stop_pulse_animation,
+            'update_display': self.update_display,
+            'update_attack_buttons': self.update_attack_buttons,
+            'check_victory': self.check_victory,
+            'is_ai_player': lambda player_id: self.state.players[player_id - 1]['is_ai'],
+            'schedule_ai_action': self._schedule_ai_turn,
+            'clear_ai_cache': lambda: self.ai.clear_cache() if self.ai else None
+        }
+        self.turn_manager = TurnManager(self.state, turn_callbacks)
         
         # Update size info when window changes
         self.update_window_size_info()
@@ -900,6 +901,47 @@ F2 - Show performance stats"""
             # Fallback for testing without UI
             action_func()
     
+    def _schedule_ai_turn(self, mech: 'Mech'):
+        """Helper to schedule AI turn via AI controller"""
+        self.ai.schedule_action(lambda: self.ai.execute_turn(mech))
+    
+    def _on_turn_changed(self, turn_number: int):
+        """Callback when turn changes - update turn label"""
+        if hasattr(self, 'turn_label') and self.turn_label:
+            self.turn_label.config(text=f"Turn {turn_number}")
+    
+    def _on_mech_activated(self, mech: 'Mech'):
+        """Callback when mech is activated - update active mech label"""
+        if hasattr(self, 'current_mech_label') and self.current_mech_label:
+            self.current_mech_label.config(text=f"Active: {mech.stats.name} (Player {mech.player_id})")
+    
+    def _on_initiative_updated(self, initiative_data: list):
+        """Callback to update initiative display with prepared data"""
+        # Check if UI exists yet
+        if not hasattr(self, 'initiative_frame') or not self.initiative_frame:
+            return
+        
+        # Clear existing display
+        for widget in self.initiative_frame.winfo_children():
+            widget.destroy()
+        
+        # Render initiative data
+        for i, mech, text, color, bg_color in initiative_data:
+            # Use tk.Label for proper background color support
+            label = tk.Label(
+                self.initiative_frame,
+                text=text,
+                font=("Arial", 9),
+                fg=color
+            )
+            # Only set background if specified (ttk frames may not support bg)
+            if bg_color:
+                try:
+                    label.config(bg=bg_color)
+                except tk.TclError:
+                    pass  # Ignore if bg not supported
+            label.pack(anchor=tk.W, fill=tk.X, pady=1)
+    
     def show_game_setup(self):
         """Show the game setup screen using modular GameSetupScreen"""
         # Create setup screen with callbacks
@@ -1327,93 +1369,14 @@ F2 - Show performance stats"""
         return self.state.calculate_initiative_order()
     
     def update_initiative_display(self):
-        """Update the initiative display panel"""
-        # Check if UI exists yet
-        if not hasattr(self, 'initiative_frame'):
-            return
+        """Update the initiative display panel - delegates to turn manager"""
+        if self.turn_manager:
+            # TurnManager will call _on_initiative_updated callback
+            self.turn_manager._update_initiative_ui()
             
-        # Clear existing display
-        for widget in self.initiative_frame.winfo_children():
-            widget.destroy()
-        
-        # Show current initiative order
-        alive_count = len([m for m in self.state.initiative_order if not m.is_destroyed()])
-        
-        for i, mech in enumerate(self.state.initiative_order):
-            # Determine if this is the active mech
-            is_active = (i == self.state.current_mech_index and not mech.is_destroyed())
-            
-            # Set colors based on mech status
-            if mech.is_destroyed():
-                color = "red"
-                bg_color = "#ffeeee"  # Light red background
-            elif is_active:
-                color = "green"
-                bg_color = "lightgreen"
-            else:
-                color = "black"
-                bg_color = None
-                
-            # Build display text
-            if mech.is_destroyed():
-                text = f"{i+1}. {mech.stats.name} (P{mech.player_id}) [DESTROYED]"
-            else:
-                text = f"{i+1}. {mech.stats.name} (P{mech.player_id})"
-                if mech.has_moved and mech.has_fired:
-                    text += " [Done]"
-                elif mech.has_moved:
-                    text += " [Moved]"
-                elif mech.has_fired:
-                    text += " [Fired]"
-                
-            # Add active indicator
-            if is_active:
-                text = "→ " + text + " ←"
-            
-            # Create and configure label
-            label = ttk.Label(self.initiative_frame, text=text, foreground=color)
-            if bg_color:
-                label.configure(background=bg_color)
-            label.pack(anchor=tk.W, fill=tk.X, pady=1)
-    
     def activate_next_mech(self):
         """Activate the next mech in initiative order"""
-        # Skip destroyed mechs in activation
-        while (self.state.current_mech_index < len(self.state.initiative_order) and 
-               self.state.initiative_order[self.state.current_mech_index].is_destroyed()):
-            self.state.current_mech_index += 1
-            
-        if self.state.current_mech_index < len(self.state.initiative_order):
-            current_mech = self.state.initiative_order[self.state.current_mech_index]
-            self.current_mech_label.config(text=f"Active: {current_mech.stats.name} (Player {current_mech.player_id})")
-            
-            # Clear previous selection and targeting
-            self.state.set_target(None)
-            
-            # Check if current mech belongs to an AI player
-            player_info = self.state.players[current_mech.player_id - 1]
-            is_ai_player = player_info["is_ai"]
-            
-            if is_ai_player:
-                # AI turn for any AI player - enforce AI action speed consistently
-                if self.state.selected_mech:
-                    self.stop_pulse_animation(self.state.selected_mech)
-                self.state.select_mech(current_mech)
-                self.start_pulse_animation(current_mech)
-                player_name = player_info["name"]
-                self.log(f"AI {player_name}: {current_mech.stats.name}'s turn")
-                # Delegate to AI controller
-                self.ai.schedule_action(lambda: self.ai.execute_turn(current_mech))
-            else:
-                # Human player turn - no delay needed
-                if self.state.selected_mech:
-                    self.stop_pulse_animation(self.state.selected_mech)
-                self.state.select_mech(current_mech)
-                self.start_pulse_animation(current_mech)
-                player_name = player_info["name"]
-                self.log(f"{player_name}: {current_mech.stats.name}'s turn")
-        
-        self.update_display()
+        self.turn_manager.activate_next_mech()
     
     def on_canvas_click(self, event):
         """Handle canvas click events"""
@@ -1814,62 +1777,15 @@ F2 - Show performance stats"""
     
     def end_movement_phase(self):
         """End movement phase for current mech and advance to attack phase"""
-        if self.state.game_over:
-            return
-            
-        current_mech = self.state.initiative_order[self.state.current_mech_index]
-        if current_mech.current_phase == MechPhase.MOVEMENT:
-            current_mech.end_movement_phase()
-            self.update_attack_buttons()
-            self.update_display()
+        self.turn_manager.end_movement_phase()
     
     def end_turn(self):
         """End current mech's turn"""
-        try:
-            if self.state.game_over:
-                return
-                
-            # Use state manager to advance to next mech
-            if not self.state.advance_to_next_mech():
-                # Turn should end
-                self.start_new_turn()
-            else:
-                # Continue with next mech
-                self.activate_next_mech()
-        except Exception as e:
-            messagebox.showerror("Turn Error", f"Error ending turn: {str(e)}")
-            print(f"Error in end_turn: {str(e)}")
+        self.turn_manager.end_current_turn()
     
     def start_new_turn(self):
         """Start a new turn"""
-        if self.state.game_over:
-            return
-            
-        # Clear AI cache for new turn
-        if self.ai:
-            self.ai.clear_cache()
-        
-        # Use state manager to start new turn
-        self.state.start_new_turn()
-        self.turn_label.config(text=f"Turn {self.state.current_turn}")
-        
-        # Reset all living mechs
-        for mech in self.state.mechs:
-            if not mech.is_destroyed():
-                mech.start_turn()
-        
-        # Recalculate initiative (include destroyed mechs at bottom)
-        self.state.update_initiative_order()
-        
-        # Check if any alive mechs remain
-        alive_mechs = self.state.get_alive_mechs()
-        if not alive_mechs:
-            self.log("All mechs destroyed!")
-            self.state.game_over = True
-            return
-        
-        self.log(f"=== TURN {self.state.current_turn} ===")
-        self.activate_next_mech()
+        self.turn_manager.start_new_turn()
     
     def check_victory(self):
         """Check for victory conditions - delegates to state manager"""
