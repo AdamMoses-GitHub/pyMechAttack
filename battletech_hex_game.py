@@ -26,6 +26,7 @@ from game_state import GameState
 from combat_system import CombatSystem
 from ai_controller import AIController
 from turn_manager import TurnManager
+from board_manager import BoardManager
 
 # Import UI modules
 from ui_setup_screen import GameSetupScreen
@@ -44,6 +45,9 @@ class BattleTechGame:
         
         # Initialize game state manager
         self.state = GameState()
+        
+        # Initialize board manager
+        self.board = BoardManager(self.state.board_size)
         
         # Initialize combat system
         self.combat = CombatSystem(self.state, hex_utils)
@@ -348,25 +352,10 @@ F2 - Show performance stats"""
         self.update_status("Game initialized. Select a mech to begin.")
         
     def create_board(self):
-        """Create the hex board"""
-        for q in range(-self.state.board_size, self.state.board_size + 1):
-            for r in range(max(-self.state.board_size, -q - self.state.board_size), 
-                          min(self.state.board_size, -q + self.state.board_size) + 1):
-                # Add terrain variety with realistic distribution
-                rand = random.random()
-                if rand < 0.15:
-                    terrain = "forest"
-                elif rand < 0.25:
-                    terrain = "shallow_water"
-                elif rand < 0.30:
-                    terrain = "deep_water"
-                elif rand < 0.35:
-                    terrain = "mountain"
-                else:
-                    terrain = "clear"
-                
-                hex_tile = HexTile(q, r, terrain)
-                self.state.hex_tiles[(q, r)] = hex_tile
+        """Create the hex board using BoardManager"""
+        self.board.create_board()
+        # Update GameState reference to board tiles
+        self.state.hex_tiles = self.board.hex_tiles
     
     def setup_mechs(self):
         """Setup initial mechs for all players"""
@@ -400,7 +389,11 @@ F2 - Show performance stats"""
             
             # Find suitable starting positions
             side = starting_sides[player_id - 1]
-            player_positions = self.find_starting_positions(player_id=player_id, side=side)
+            player_positions = self.board.find_starting_positions(
+                side=side,
+                num_mechs=4,
+                initial_proximity=self.state.initial_proximity
+            )
             
             # Create and place mechs
             for i, pos in enumerate(player_positions):
@@ -415,151 +408,6 @@ F2 - Show performance stats"""
                     mech.get_line_of_sight = lambda from_h, to_h: hex_utils.has_line_of_sight(from_h, to_h, self.state.hex_tiles)
                     
                     self.state.add_mech(mech)
-    
-    def find_starting_positions(self, player_id: int, side: str, num_mechs: int = 4) -> list[tuple[int, int]]:
-        """Find suitable starting positions on clear terrain or forests in corner areas"""
-        suitable_positions = []
-        
-        # Define search areas for each corner - use outer regions of the board
-        # Board size is 20, corners are at the vertices of the hex-shaped board
-        # Need to respect cube coordinate constraint: abs(q) + abs(r) + abs(s) <= board_size * 2
-        # where s = -q - r
-        
-        # Calculate corner offset based on proximity setting
-        if self.state.initial_proximity == "close":
-            corner_offset = int(self.state.board_size * 0.25)  # Very close (25% of board radius)
-        elif self.state.initial_proximity == "far":
-            corner_offset = int(self.state.board_size * 0.95)  # Very far (95% of board radius)
-        else:  # medium (default)
-            corner_offset = int(self.state.board_size * 0.65)  # Medium distance (65% of board radius)
-        
-        if side == "northwest":
-            # Top-left corner: negative q, negative r, but s = -q-r must be valid
-            # For corner, want q ≈ -board_size, r ≈ 0 (top edge)
-            q_range = range(-self.state.board_size, -corner_offset)
-            r_range = range(-corner_offset, 1)
-        elif side == "northeast":
-            # Top-right corner: positive q, negative r
-            # For corner, want q ≈ 0, r ≈ -board_size (right-top edge)
-            q_range = range(-corner_offset, 1)
-            r_range = range(-self.state.board_size, -corner_offset)
-        elif side == "southwest":
-            # Bottom-left corner: negative q, positive r
-            # For corner, want q ≈ 0, r ≈ board_size (left-bottom edge)
-            q_range = range(-corner_offset, 1)
-            r_range = range(corner_offset, self.state.board_size + 1)
-        elif side == "southeast":
-            # Bottom-right corner: positive q, positive r, but s must be valid
-            # For corner, want q ≈ board_size, r ≈ 0 (bottom edge)
-            q_range = range(corner_offset, self.state.board_size + 1)
-            r_range = range(-corner_offset, 1)
-        else:
-            # Fallback for legacy left/right positions (shouldn't be used)
-            if side == "left":
-                q_range = range(-self.state.board_size, -corner_offset)
-                r_range = range(-corner_offset//2, corner_offset//2 + 1)
-            else:  # right
-                q_range = range(corner_offset, self.state.board_size + 1)
-                r_range = range(-corner_offset//2, corner_offset//2 + 1)
-        
-        # Find all suitable hexes (clear or forest terrain) in the focused area
-        candidates = []
-        for q in q_range:
-            for r in r_range:
-                if (q, r) in self.state.hex_tiles:
-                    hex_tile = self.state.hex_tiles[(q, r)]
-                    # Only allow clear terrain or forests for starting positions
-                    if hex_tile.terrain_type in ["clear", "forest"]:
-                        candidates.append((q, r))
-        
-        # If we have candidates, select them with reasonable spacing
-        if candidates:
-            # Sort by distance from center r=0 for better formation
-            candidates.sort(key=lambda pos: (abs(pos[1]), abs(pos[0])))
-            
-            selected = []
-            # Set minimum distance between mechs based on proximity setting
-            if self.state.initial_proximity == "close":
-                min_distance = 1  # Mechs can be adjacent for close formation
-            elif self.state.initial_proximity == "far":
-                min_distance = 3  # Larger spacing for far formation
-            else:  # medium
-                min_distance = 2  # Standard spacing
-            
-            # Try to select well-spaced positions
-            for candidate in candidates:
-                if not selected:
-                    # Always take the first candidate (closest to center)
-                    selected.append(candidate)
-                else:
-                    # Check if this position has reasonable spacing
-                    too_close = False
-                    for selected_pos in selected:
-                        distance = self.state.hex_tiles[candidate].distance_to(self.state.hex_tiles[selected_pos])
-                        if distance < min_distance:
-                            too_close = True
-                            break
-                    
-                    if not too_close:
-                        selected.append(candidate)
-                        if len(selected) >= num_mechs:
-                            break
-            
-            # If we don't have enough well-spaced positions, add closest remaining candidates
-            if len(selected) < num_mechs:
-                for candidate in candidates:
-                    if candidate not in selected:
-                        selected.append(candidate)
-                        if len(selected) >= num_mechs:
-                            break
-            
-            suitable_positions = selected[:num_mechs]
-        
-        # Enhanced fallback with guaranteed visible positions
-        if len(suitable_positions) < num_mechs:
-            self.log(f"Warning: Limited suitable terrain for Player {player_id}, using fallback positions")
-            
-            # Define safe fallback positions for each corner
-            if side == "northwest":
-                fallback_positions = [(-5, -2), (-5, -1), (-4, -3), (-4, -1), (-3, -2), (-3, 0)]
-            elif side == "northeast":
-                fallback_positions = [(5, -2), (5, -1), (4, -3), (4, -1), (3, -2), (3, 0)]
-            elif side == "southwest":
-                fallback_positions = [(-5, 2), (-5, 3), (-4, 1), (-4, 3), (-3, 2), (-3, 4)]
-            elif side == "southeast":
-                fallback_positions = [(5, 2), (5, 3), (4, 1), (4, 3), (3, 2), (3, 4)]
-            elif side == "left":
-                fallback_positions = [(-5, 0), (-5, 1), (-4, -1), (-4, 1), (-3, 0), (-3, 2)]
-            else:  # right
-                fallback_positions = [(5, 0), (5, -1), (4, 1), (4, -1), (3, 0), (3, -2)]
-            
-            # Add fallback positions that exist on the map and have suitable terrain
-            for pos in fallback_positions:
-                if len(suitable_positions) >= num_mechs:
-                    break
-                if pos in self.state.hex_tiles and pos not in suitable_positions:
-                    hex_tile = self.state.hex_tiles[pos]
-                    # Accept any passable terrain in fallback (not just clear/forest)
-                    if hex_tile.terrain_type != "deep_water" and hex_tile.terrain_type != "mountain":
-                        suitable_positions.append(pos)
-        
-        # Final safety check - ensure we have at least some positions
-        if not suitable_positions:
-            self.log(f"Critical: No valid positions found for Player {player_id}, using emergency fallback")
-            # Emergency positions based on player ID
-            if player_id == 1:
-                suitable_positions = [(-3, -1), (-3, 0), (-2, -2), (-2, 0)]
-            elif player_id == 2:
-                suitable_positions = [(3, -1), (3, 0), (2, -2), (2, 0)]
-            elif player_id == 3:
-                suitable_positions = [(0, -3), (1, -3), (-1, -2), (1, -2)]
-            else:  # player_id == 4
-                suitable_positions = [(0, 3), (1, 3), (-1, 2), (1, 2)]
-            
-            # Filter to only existing positions
-            suitable_positions = [pos for pos in suitable_positions if pos in self.state.hex_tiles]
-        
-        return suitable_positions[:num_mechs]
     
     def center_view(self):
         """Center the view on the battlefield"""
