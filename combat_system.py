@@ -2,7 +2,8 @@
 Combat System Module
 Handles all combat-related logic including weapon ranges, targeting, and attack execution.
 """
-from typing import TYPE_CHECKING, Tuple, Optional
+from typing import TYPE_CHECKING, Tuple, Optional, Union
+from enum import Enum
 
 if TYPE_CHECKING:
     from entities import Mech, HexTile
@@ -10,14 +11,20 @@ if TYPE_CHECKING:
     import hex_utils
 
 
-class CombatSystem:
-    """Manages combat mechanics including weapon ranges, targeting validation, and attack execution"""
+class WeaponType(Enum):
+    """Enumeration of available weapon types"""
+    LASER = "laser"
+    MISSILE = "missile"
     
-    # Weapon configuration constants
-    WEAPON_RANGES = {
+    # Weapon range configuration
+    RANGES = {
         "laser": 8,
         "missile": 12
     }
+
+
+class CombatSystem:
+    """Manages combat mechanics including weapon ranges, targeting validation, and attack execution"""
     
     def __init__(self, game_state: 'GameState', hex_utils_module):
         """
@@ -30,17 +37,27 @@ class CombatSystem:
         self.state = game_state
         self.hex_utils = hex_utils_module
     
-    def get_weapon_range(self, weapon_type: str) -> int:
-        """Get the base range for a weapon type"""
-        return self.WEAPON_RANGES.get(weapon_type, 0)
+    def get_weapon_range(self, weapon_type: Union[WeaponType, str]) -> int:
+        """
+        Get the base range for a weapon type
+        
+        Args:
+            weapon_type: WeaponType enum or string identifier
+            
+        Returns:
+            Range in hexes, or 0 if weapon type is invalid
+        """
+        if isinstance(weapon_type, WeaponType):
+            return WeaponType.RANGES.get(weapon_type.value, 0)
+        return WeaponType.RANGES.get(weapon_type, 0)
     
-    def get_mechs_in_range(self, attacking_mech: 'Mech', weapon_type: str) -> list['Mech']:
+    def get_mechs_in_range(self, attacking_mech: 'Mech', weapon_type: Union[WeaponType, str]) -> list['Mech']:
         """
         Get all enemy mechs within range of the specified weapon and with clear LOS
         
         Args:
             attacking_mech: The mech attempting to attack
-            weapon_type: Type of weapon ("laser" or "missile")
+            weapon_type: Type of weapon (WeaponType enum or string: "laser", "missile")
             
         Returns:
             List of mechs that are valid targets
@@ -81,14 +98,14 @@ class CombatSystem:
         """
         return self.hex_utils.has_line_of_sight(from_hex, to_hex, self.state.hex_tiles)
     
-    def can_attack_target(self, attacker: 'Mech', target: 'Mech', weapon_type: str) -> Tuple[bool, str]:
+    def can_attack_target(self, attacker: 'Mech', target: 'Mech', weapon_type: Union[WeaponType, str]) -> Tuple[bool, str]:
         """
         Check if an attacker can attack a target with the specified weapon
         
         Args:
             attacker: The attacking mech
             target: The target mech
-            weapon_type: Type of weapon to use
+            weapon_type: Type of weapon to use (WeaponType enum or string)
             
         Returns:
             Tuple of (can_attack: bool, reason: str)
@@ -127,7 +144,7 @@ class CombatSystem:
         
         return True, "Valid target"
     
-    def calculate_hit_chance(self, attacker: 'Mech', target: 'Mech', weapon_type: str) -> float:
+    def calculate_hit_chance(self, attacker: 'Mech', target: 'Mech', weapon_type: Union[WeaponType, str]) -> float:
         """
         Calculate the hit chance for an attack
         
@@ -137,14 +154,14 @@ class CombatSystem:
         Args:
             attacker: The attacking mech
             target: The target mech
-            weapon_type: Type of weapon to use
+            weapon_type: Type of weapon to use (WeaponType enum or string)
             
         Returns:
             Hit chance as a float between 0.0 and 1.0
         """
         return attacker.calculate_hit_chance(target, weapon_type)
     
-    def execute_attack(self, attacker: 'Mech', target: 'Mech', weapon_type: str) -> dict:
+    def execute_attack(self, attacker: 'Mech', target: 'Mech', weapon_type: Union[WeaponType, str]) -> dict:
         """
         Execute an attack from attacker to target
         
@@ -154,7 +171,7 @@ class CombatSystem:
         Args:
             attacker: The attacking mech
             target: The target mech
-            weapon_type: Type of weapon to use
+            weapon_type: Type of weapon to use (WeaponType enum or string)
             
         Returns:
             Dictionary with attack results (from Mech.attack method)

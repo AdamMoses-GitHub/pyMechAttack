@@ -11,6 +11,35 @@ from entities import HexTile, Mech
 class BoardManager:
     """Manages hex board state, terrain generation, and spatial operations"""
     
+    # Terrain distribution configuration (cumulative probabilities)
+    TERRAIN_DISTRIBUTION = {
+        "forest": 0.15,
+        "shallow_water": 0.10,
+        "deep_water": 0.05,
+        "mountain": 0.05,
+        "clear": 0.65
+    }
+    
+    # Corner range definitions for spawn positions
+    CORNER_RANGES = {
+        "northwest": {"q_sign": -1, "r_sign": -1},
+        "northeast": {"q_sign": 1, "r_sign": -1},
+        "southwest": {"q_sign": -1, "r_sign": 1},
+        "southeast": {"q_sign": 1, "r_sign": 1},
+        "left": {"q_sign": -1, "r_sign": 0},
+        "right": {"q_sign": 1, "r_sign": 0}
+    }
+    
+    # Fallback spawn positions for each corner
+    FALLBACK_POSITIONS = {
+        "northwest": [(-5, -2), (-5, -1), (-4, -3), (-4, -1), (-3, -2), (-3, 0)],
+        "northeast": [(5, -2), (5, -1), (4, -3), (4, -1), (3, -2), (3, 0)],
+        "southwest": [(-5, 2), (-5, 3), (-4, 1), (-4, 3), (-3, 2), (-3, 4)],
+        "southeast": [(5, 2), (5, 3), (4, 1), (4, 3), (3, 2), (3, 4)],
+        "left": [(-5, 0), (-5, 1), (-4, -1), (-4, 1), (-3, 0), (-3, 2)],
+        "right": [(5, 0), (5, -1), (4, 1), (4, -1), (3, 0), (3, -2)]
+    }
+    
     def __init__(self, board_size: int = 20):
         """
         Initialize the board manager
@@ -20,6 +49,23 @@ class BoardManager:
         """
         self.board_size = board_size
         self.hex_tiles: Dict[Tuple[int, int], HexTile] = {}
+    
+    def _select_terrain(self, rand_value: float) -> str:
+        """
+        Select terrain type based on random value and distribution config
+        
+        Args:
+            rand_value: Random float between 0.0 and 1.0
+            
+        Returns:
+            Terrain type string
+        """
+        cumulative = 0.0
+        for terrain, probability in self.TERRAIN_DISTRIBUTION.items():
+            cumulative += probability
+            if rand_value < cumulative:
+                return terrain
+        return "clear"  # Fallback
         
     def create_board(self):
         """Create the hex board with randomized terrain"""
@@ -28,19 +74,8 @@ class BoardManager:
         for q in range(-self.board_size, self.board_size + 1):
             for r in range(max(-self.board_size, -q - self.board_size), 
                           min(self.board_size, -q + self.board_size) + 1):
-                # Add terrain variety with realistic distribution
-                rand = random.random()
-                if rand < 0.15:
-                    terrain = "forest"
-                elif rand < 0.25:
-                    terrain = "shallow_water"
-                elif rand < 0.30:
-                    terrain = "deep_water"
-                elif rand < 0.35:
-                    terrain = "mountain"
-                else:
-                    terrain = "clear"
-                
+                # Select terrain based on probability distribution
+                terrain = self._select_terrain(random.random())
                 hex_tile = HexTile(q, r, terrain)
                 self.hex_tiles[(q, r)] = hex_tile
     
@@ -79,6 +114,40 @@ class BoardManager:
         """
         return self.hex_tiles
     
+    def _get_corner_ranges(self, side: str, corner_offset: int) -> Tuple[range, range]:
+        """
+        Get coordinate ranges for a specific corner/side
+        
+        Args:
+            side: Starting side name
+            corner_offset: Offset distance from board edge
+            
+        Returns:
+            Tuple of (q_range, r_range)
+        """
+        if side not in self.CORNER_RANGES:
+            side = "left"  # Default fallback
+        
+        corner = self.CORNER_RANGES[side]
+        q_sign = corner["q_sign"]
+        r_sign = corner["r_sign"]
+        
+        if r_sign == 0:  # Left/right side (special case)
+            q_range = range(q_sign * corner_offset, q_sign * self.board_size + (q_sign // abs(q_sign)))
+            r_range = range(-corner_offset // 2, corner_offset // 2 + 1)
+        else:  # Diagonal corners
+            if q_sign > 0:
+                q_range = range(corner_offset, self.board_size + 1)
+            else:
+                q_range = range(-self.board_size, -corner_offset + 1)
+            
+            if r_sign > 0:
+                r_range = range(corner_offset, self.board_size + 1)
+            else:
+                r_range = range(-self.board_size, -corner_offset + 1)
+        
+        return q_range, r_range
+    
     def find_starting_positions(
         self, 
         side: str, 
@@ -106,31 +175,8 @@ class BoardManager:
         else:  # medium (default)
             corner_offset = int(self.board_size * 0.65)  # Medium distance (65% of board radius)
         
-        # Define search areas for each corner
-        if side == "northwest":
-            # Top-left corner: negative q, negative r
-            q_range = range(-self.board_size, -corner_offset)
-            r_range = range(-corner_offset, 1)
-        elif side == "northeast":
-            # Top-right corner: positive q, negative r
-            q_range = range(-corner_offset, 1)
-            r_range = range(-self.board_size, -corner_offset)
-        elif side == "southwest":
-            # Bottom-left corner: negative q, positive r
-            q_range = range(-corner_offset, 1)
-            r_range = range(corner_offset, self.board_size + 1)
-        elif side == "southeast":
-            # Bottom-right corner: positive q, positive r
-            q_range = range(corner_offset, self.board_size + 1)
-            r_range = range(-corner_offset, 1)
-        else:
-            # Fallback for legacy left/right positions
-            if side == "left":
-                q_range = range(-self.board_size, -corner_offset)
-                r_range = range(-corner_offset//2, corner_offset//2 + 1)
-            else:  # right
-                q_range = range(corner_offset, self.board_size + 1)
-                r_range = range(-corner_offset//2, corner_offset//2 + 1)
+        # Get search ranges using corner mapping
+        q_range, r_range = self._get_corner_ranges(side, corner_offset)
         
         # Find all suitable hexes (clear or forest terrain) in the focused area
         candidates = []
@@ -187,19 +233,8 @@ class BoardManager:
         
         # Enhanced fallback with guaranteed visible positions
         if len(suitable_positions) < num_mechs:
-            # Define safe fallback positions for each corner
-            if side == "northwest":
-                fallback_positions = [(-5, -2), (-5, -1), (-4, -3), (-4, -1), (-3, -2), (-3, 0)]
-            elif side == "northeast":
-                fallback_positions = [(5, -2), (5, -1), (4, -3), (4, -1), (3, -2), (3, 0)]
-            elif side == "southwest":
-                fallback_positions = [(-5, 2), (-5, 3), (-4, 1), (-4, 3), (-3, 2), (-3, 4)]
-            elif side == "southeast":
-                fallback_positions = [(5, 2), (5, 3), (4, 1), (4, 3), (3, 2), (3, 4)]
-            elif side == "left":
-                fallback_positions = [(-5, 0), (-5, 1), (-4, -1), (-4, 1), (-3, 0), (-3, 2)]
-            else:  # right
-                fallback_positions = [(5, 0), (5, -1), (4, 1), (4, -1), (3, 0), (3, -2)]
+            # Get fallback positions for this corner
+            fallback_positions = self.FALLBACK_POSITIONS.get(side, self.FALLBACK_POSITIONS["left"])
             
             # Add fallback positions that exist on the map and have suitable terrain
             for pos in fallback_positions:
