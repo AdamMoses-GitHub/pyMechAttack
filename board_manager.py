@@ -49,6 +49,7 @@ class BoardManager:
         """
         self.board_size = board_size
         self.hex_tiles: Dict[Tuple[int, int], HexTile] = {}
+        self._terrain_stats_cache: Optional[Dict[str, int]] = None
     
     def _select_terrain(self, rand_value: float) -> str:
         """
@@ -70,6 +71,7 @@ class BoardManager:
     def create_board(self):
         """Create the hex board with randomized terrain"""
         self.hex_tiles.clear()
+        self._terrain_stats_cache = None  # Invalidate cache
         
         for q in range(-self.board_size, self.board_size + 1):
             for r in range(max(-self.board_size, -q - self.board_size), 
@@ -133,7 +135,8 @@ class BoardManager:
         r_sign = corner["r_sign"]
         
         if r_sign == 0:  # Left/right side (special case)
-            q_range = range(q_sign * corner_offset, q_sign * self.board_size + (q_sign // abs(q_sign)))
+            q_end = q_sign * self.board_size + (1 if q_sign > 0 else -1)
+            q_range = range(q_sign * corner_offset, q_end)
             r_range = range(-corner_offset // 2, corner_offset // 2 + 1)
         else:  # Diagonal corners
             if q_sign > 0:
@@ -165,6 +168,13 @@ class BoardManager:
         Returns:
             List of (q, r) coordinate tuples for starting positions
         """
+        if num_mechs <= 0:
+            raise ValueError("num_mechs must be greater than 0")
+        if initial_proximity not in ["close", "medium", "far"]:
+            raise ValueError("initial_proximity must be 'close', 'medium', or 'far'")
+        if side not in self.CORNER_RANGES and side not in self.FALLBACK_POSITIONS:
+            raise ValueError(f"Invalid side: {side}")
+        
         suitable_positions = []
         
         # Calculate corner offset based on proximity setting
@@ -282,8 +292,10 @@ class BoardManager:
         Returns:
             Dictionary mapping terrain types to counts
         """
-        stats = {}
-        for tile in self.hex_tiles.values():
-            terrain = tile.terrain_type
-            stats[terrain] = stats.get(terrain, 0) + 1
-        return stats
+        if self._terrain_stats_cache is None:
+            stats = {}
+            for tile in self.hex_tiles.values():
+                terrain = tile.terrain_type
+                stats[terrain] = stats.get(terrain, 0) + 1
+            self._terrain_stats_cache = stats
+        return self._terrain_stats_cache
