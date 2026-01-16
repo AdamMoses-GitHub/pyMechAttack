@@ -40,6 +40,22 @@ class BoardManager:
         "right": [(5, 0), (5, -1), (4, 1), (4, -1), (3, 0), (3, -2)]
     }
     
+    # Proximity configuration for starting positions
+    PROXIMITY_MULTIPLIERS = {
+        "close": 0.25,
+        "medium": 0.65,
+        "far": 0.95
+    }
+    
+    MIN_DISTANCES = {
+        "close": 1,
+        "medium": 2,
+        "far": 3
+    }
+    
+    # Valid terrain types for starting positions
+    VALID_STARTING_TERRAINS = ["clear", "forest"]
+    
     def __init__(self, board_size: int = 20):
         """
         Initialize the board manager
@@ -178,12 +194,7 @@ class BoardManager:
         suitable_positions = []
         
         # Calculate corner offset based on proximity setting
-        if initial_proximity == "close":
-            corner_offset = int(self.board_size * 0.25)  # Very close (25% of board radius)
-        elif initial_proximity == "far":
-            corner_offset = int(self.board_size * 0.95)  # Very far (95% of board radius)
-        else:  # medium (default)
-            corner_offset = int(self.board_size * 0.65)  # Medium distance (65% of board radius)
+        corner_offset = int(self.board_size * self.PROXIMITY_MULTIPLIERS[initial_proximity])
         
         # Get search ranges using corner mapping
         q_range, r_range = self._get_corner_ranges(side, corner_offset)
@@ -195,7 +206,7 @@ class BoardManager:
                 if (q, r) in self.hex_tiles:
                     hex_tile = self.hex_tiles[(q, r)]
                     # Only allow clear terrain or forests for starting positions
-                    if hex_tile.terrain_type in ["clear", "forest"]:
+                    if hex_tile.terrain_type in self.VALID_STARTING_TERRAINS:
                         candidates.append((q, r))
         
         # If we have candidates, select them with reasonable spacing
@@ -205,12 +216,7 @@ class BoardManager:
             
             selected = []
             # Set minimum distance between mechs based on proximity setting
-            if initial_proximity == "close":
-                min_distance = 1  # Mechs can be adjacent for close formation
-            elif initial_proximity == "far":
-                min_distance = 3  # Larger spacing for far formation
-            else:  # medium
-                min_distance = 2  # Standard spacing
+            min_distance = self.MIN_DISTANCES[initial_proximity]
             
             # Try to select well-spaced positions
             for candidate in candidates:
@@ -252,7 +258,7 @@ class BoardManager:
                     break
                 if pos in self.hex_tiles and pos not in suitable_positions:
                     hex_tile = self.hex_tiles[pos]
-                    if hex_tile.terrain_type in ["clear", "forest"]:
+                    if hex_tile.terrain_type in self.VALID_STARTING_TERRAINS:
                         suitable_positions.append(pos)
         
         return suitable_positions
@@ -267,10 +273,7 @@ class BoardManager:
         if not self.hex_tiles:
             return (0, 0, 0, 0)
         
-        coords = list(self.hex_tiles.keys())
-        qs = [q for q, r in coords]
-        rs = [r for q, r in coords]
-        
+        qs, rs = zip(*self.hex_tiles.keys())
         return (min(qs), max(qs), min(rs), max(rs))
     
     def count_terrain_type(self, terrain_type: str) -> int:
