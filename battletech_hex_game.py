@@ -26,6 +26,7 @@ from game_state import GameState
 from combat_system import CombatSystem
 from ai_controller import AIController
 from turn_manager import TurnManager
+from turn_phase_handler import TurnPhaseHandler
 from board_manager import BoardManager
 
 # Import UI modules
@@ -1581,9 +1582,14 @@ F2 - Show performance stats"""
             
             self.check_victory()
             
-            # End attack phase and complete turn after firing
-            self.state.selected_mech.end_attack_phase()
-            self.log(f"{self.state.selected_mech.stats.name} has completed their turn")
+            # End attack phase using phase handler
+            try:
+                self.turn_manager.phase_handler.advance_to_done(self.state.selected_mech, reason="laser attack")
+                self.log(f"{self.state.selected_mech.stats.name} has completed their turn")
+            except Exception as e:
+                self.log(f"Error ending attack phase: {str(e)}")
+                print(f"Error in laser_attack: {str(e)}")
+            
             self.end_turn()
     
     def missile_attack(self):
@@ -1618,9 +1624,14 @@ F2 - Show performance stats"""
             
             self.check_victory()
             
-            # End attack phase and complete turn after firing
-            self.state.selected_mech.end_attack_phase()
-            self.log(f"{self.state.selected_mech.stats.name} has completed their turn")
+            # End attack phase using phase handler
+            try:
+                self.turn_manager.phase_handler.advance_to_done(self.state.selected_mech, reason="missile attack")
+                self.log(f"{self.state.selected_mech.stats.name} has completed their turn")
+            except Exception as e:
+                self.log(f"Error ending attack phase: {str(e)}")
+                print(f"Error in missile_attack: {str(e)}")
+            
             self.end_turn()
     
     def end_movement_phase(self):

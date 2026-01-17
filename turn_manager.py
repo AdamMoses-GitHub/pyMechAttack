@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from game_state import GameState
 
 from models import MechPhase
+from turn_phase_handler import TurnPhaseHandler
 
 
 class TurnManager:
@@ -37,6 +38,14 @@ class TurnManager:
         """
         self.state = game_state
         self.callbacks = callbacks
+        
+        # Initialize phase handler with shared callbacks
+        phase_handler_callbacks = {
+            'log': callbacks.get('log'),
+            'update_display': callbacks.get('update_display'),
+            'update_buttons': callbacks.get('update_attack_buttons')
+        }
+        self.phase_handler = TurnPhaseHandler(phase_handler_callbacks)
     
     def initialize_first_turn(self):
         """
@@ -184,16 +193,18 @@ class TurnManager:
         End movement phase for current mech and advance to attack phase
         
         This is called when player clicks "End Movement" button.
+        Uses TurnPhaseHandler to validate and execute the transition.
         """
         if self.state.game_over:
             return
         
         if self.state.current_mech_index < len(self.state.initiative_order):
             current_mech = self.state.initiative_order[self.state.current_mech_index]
-            if current_mech.current_phase == MechPhase.MOVEMENT:
-                current_mech.end_movement_phase()
-                self.callbacks['update_attack_buttons']()
-                self.callbacks['update_display']()
+            try:
+                self.phase_handler.advance_to_attack(current_mech)
+            except Exception as e:
+                messagebox.showerror("Phase Error", f"Cannot advance to attack phase: {str(e)}")
+                print(f"Error advancing to attack phase: {str(e)}")
     
     def get_current_mech(self) -> Optional['Mech']:
         """

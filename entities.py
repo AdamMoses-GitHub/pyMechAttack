@@ -272,14 +272,6 @@ class Mech:
         """Check if mech has movement points remaining"""
         return self.current_phase == MechPhase.MOVEMENT and self.get_remaining_movement() > 0
     
-    def end_movement_phase(self):
-        """End movement phase and advance to attack phase"""
-        self.current_phase = MechPhase.ATTACK
-    
-    def end_attack_phase(self):
-        """End attack phase and mark turn as done"""
-        self.current_phase = MechPhase.DONE
-    
     def calculate_hit_chance(self, target: 'Mech', weapon_type: str) -> float:
         """Calculate hit chance against target with weapon type"""
         distance = self.hex_tile.distance_to(target.hex_tile)
