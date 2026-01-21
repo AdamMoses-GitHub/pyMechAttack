@@ -44,6 +44,15 @@ class GameState:
         # Game settings
         self.ai_action_speed = 2.0  # Default AI action speed in seconds
         self.initial_proximity = "medium"  # Starting position proximity
+        self.sound_effects_enabled = True  # Sound effects toggle
+        
+        # Game statistics
+        self.stats = {
+            "mechs_destroyed": [0] * 4,  # Count per player (up to 4 players)
+            "total_damage_dealt": [0] * 4,
+            "total_damage_taken": [0] * 4,
+            "kills": [0] * 4,  # Number of mechs destroyed by each player
+        }
         
     def configure_players(self, num_players: int, player_configs: List[Dict]):
         """Configure the number of players and their settings"""
@@ -52,6 +61,14 @@ class GameState:
         
         self.num_players = num_players
         self.players = player_configs[:num_players]
+        
+        # Reset stats for configured player count
+        self.stats = {
+            "mechs_destroyed": [0] * num_players,
+            "total_damage_dealt": [0] * num_players,
+            "total_damage_taken": [0] * num_players,
+            "kills": [0] * num_players,
+        }
         
     def add_mech(self, mech: Mech):
         """Add a mech to the game"""
@@ -230,3 +247,33 @@ class GameState:
             "players_alive": len([p for p in range(1, self.num_players + 1) 
                                  if self.get_player_mechs(p)])
         }
+    
+    def record_damage(self, attacker_id: int, defender_id: int, damage_amount: int):
+        """Record damage dealt and taken"""
+        if 1 <= attacker_id <= len(self.stats["total_damage_dealt"]):
+            self.stats["total_damage_dealt"][attacker_id - 1] += damage_amount
+        if 1 <= defender_id <= len(self.stats["total_damage_taken"]):
+            self.stats["total_damage_taken"][defender_id - 1] += damage_amount
+    
+    def record_mech_destroyed(self, destroyed_player_id: int, destroyer_player_id: int):
+        """Record when a mech is destroyed"""
+        if 1 <= destroyed_player_id <= len(self.stats["mechs_destroyed"]):
+            self.stats["mechs_destroyed"][destroyed_player_id - 1] += 1
+        if 1 <= destroyer_player_id <= len(self.stats["kills"]):
+            self.stats["kills"][destroyer_player_id - 1] += 1
+    
+    def get_final_scoreboard(self) -> Dict:
+        """Get final game statistics for scoreboard"""
+        scoreboard = {}
+        for player_id in range(1, self.num_players + 1):
+            player_info = self.get_player_info(player_id)
+            idx = player_id - 1
+            scoreboard[player_id] = {
+                "name": player_info["name"],
+                "color": player_info["color"],
+                "kills": self.stats["kills"][idx],
+                "mechs_destroyed": self.stats["mechs_destroyed"][idx],
+                "damage_dealt": self.stats["total_damage_dealt"][idx],
+                "damage_taken": self.stats["total_damage_taken"][idx],
+            }
+        return scoreboard

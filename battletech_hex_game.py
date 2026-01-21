@@ -808,6 +808,7 @@ F2 - Show performance stats"""
         self.state.num_players = config['num_players']
         self.state.ai_action_speed = config['ai_speed']
         self.state.initial_proximity = config['proximity']
+        self.state.sound_effects_enabled = config.get('sound_effects_enabled', True)
         
         # Update player configurations
         player_colors = ["#FF073A", "#00D9FF", "#BC13FE", "#FFFF00"]
@@ -1566,6 +1567,12 @@ F2 - Show performance stats"""
             result = self.state.selected_mech.attack(self.state.target_mech, "laser")
             self.log(f"{self.state.selected_mech.stats.name} laser attack: {result['message']}")
             
+            # Record damage statistics if hit
+            if result['hit']:
+                self.state.record_damage(self.state.selected_mech.player_id, 
+                                        self.state.target_mech.player_id,
+                                        result.get('damage', 0))
+            
             # Start weapon animation
             self.start_weapon_animation("laser", self.state.selected_mech.hex_tile, self.state.target_mech.hex_tile)
             
@@ -1578,6 +1585,9 @@ F2 - Show performance stats"""
             
             if self.state.target_mech.is_destroyed():
                 self.log(f"{self.state.target_mech.stats.name} is destroyed!")
+                # Record mech destruction
+                self.state.record_mech_destroyed(self.state.target_mech.player_id,
+                                                self.state.selected_mech.player_id)
                 self.state.set_target(None)
             
             self.check_victory()
@@ -1608,6 +1618,12 @@ F2 - Show performance stats"""
             result = self.state.selected_mech.attack(self.state.target_mech, "missile")
             self.log(f"{self.state.selected_mech.stats.name} missile attack: {result['message']}")
             
+            # Record damage statistics if hit
+            if result['hit']:
+                self.state.record_damage(self.state.selected_mech.player_id,
+                                        self.state.target_mech.player_id,
+                                        result.get('damage', 0))
+            
             # Start weapon animation
             self.start_weapon_animation("missile", self.state.selected_mech.hex_tile, self.state.target_mech.hex_tile)
             
@@ -1620,6 +1636,9 @@ F2 - Show performance stats"""
             
             if self.state.target_mech.is_destroyed():
                 self.log(f"{self.state.target_mech.stats.name} is destroyed!")
+                # Record mech destruction
+                self.state.record_mech_destroyed(self.state.target_mech.player_id,
+                                                self.state.selected_mech.player_id)
                 self.state.set_target(None)
             
             self.check_victory()
@@ -1659,9 +1678,22 @@ F2 - Show performance stats"""
             except Exception as e:
                 print(f"Warning: Animation cleanup failed during game end: {e}")
             
-            # Log and show victory message
+            # Log and show victory message with statistics
             self.log(victory_info["message"].upper())
-            messagebox.showinfo("Game Over", victory_info["message"])
+            
+            # Build scoreboard message
+            scoreboard = self.state.get_final_scoreboard()
+            stats_message = victory_info["message"] + "\n\n=== FINAL STATISTICS ===\n"
+            
+            for player_id in sorted(scoreboard.keys()):
+                player_stats = scoreboard[player_id]
+                stats_message += f"\n{player_stats['name']}:\n"
+                stats_message += f"  Kills: {player_stats['kills']}\n"
+                stats_message += f"  Mechs Destroyed: {player_stats['mechs_destroyed']}\n"
+                stats_message += f"  Damage Dealt: {player_stats['damage_dealt']}\n"
+                stats_message += f"  Damage Taken: {player_stats['damage_taken']}"
+            
+            messagebox.showinfo("Game Over", stats_message)
     
     def show_readme_popup(self):
         """Show help popup with game instructions"""
@@ -1669,58 +1701,57 @@ F2 - Show performance stats"""
         if not self.root:
             return
             
-        help_text = """
-PYMECHATTACK - COMPLETE GUIDE
+        help_text = """PYMECHATTACK - COMPLETE GUIDE
 
 === OBJECTIVE ===
 Destroy all enemy mechs to achieve victory! In multi-player games, be the last player standing!
 
 === GAME SETUP ===
-• Choose 2-4 players for epic battles
-• Configure each player as Human or AI
-• Customize player names (AI gets random callsigns)
-• Players use different colored mechs: Neon Red, Neon Blue, Neon Purple, Neon Yellow
-• Game starts with setup screen - configure before battle
+- Choose 2-4 players for epic battles
+- Configure each player as Human or AI
+- Customize player names (AI gets random callsigns)
+- Players use different colored mechs: Neon Red, Neon Blue, Neon Purple, Neon Yellow
+- Game starts with setup screen - configure before battle
 
 === CONTROLS ===
-• Click & Drag: Pan the map view around the battlefield
-• Click on your mechs: Select them (gold outline indicates selection)
-• Click on empty hexes: Move selected mech (if in movement phase)
-• Click on enemy mechs: Target them for attacks
-• Attack Buttons: Fire laser or missile weapons at targeted enemy
-• End Movement: Skip to attack phase if done moving
-• End Turn: Complete current mech's activation
-• Help: Show this help screen anytime
+- Click & Drag: Pan the map view around the battlefield
+- Click on your mechs: Select them (gold outline indicates selection)
+- Click on empty hexes: Move selected mech (if in movement phase)
+- Click on enemy mechs: Target them for attacks
+- Attack Buttons: Fire laser or missile weapons at targeted enemy
+- End Movement: Skip to attack phase if done moving
+- End Turn: Complete current mech's activation
+- Help: Show this help screen anytime
 
 === TERRAIN EFFECTS ===
-• Clear (Light Green): Movement cost 1, no special effects
-• Forest (Dark Green): Movement cost 2, provides 30% cover bonus
-• Shallow Water (Light Blue): Movement cost 3, slows movement
-• Deep Water (Dark Blue): Impassable terrain
-• Mountains (Gray): Impassable, blocks line of sight completely
+- Clear (Light Green): Movement cost 1, no special effects
+- Forest (Dark Green): Movement cost 2, provides 30% cover bonus
+- Shallow Water (Light Blue): Movement cost 3, slows movement
+- Deep Water (Dark Blue): Impassable terrain
+- Mountains (Gray): Impassable, blocks line of sight completely
 
 === COMBAT SYSTEM ===
 WEAPONS:
-• Lasers: 8 hex range, accurate (85% base), consistent damage
-• Missiles: 12 hex range, less accurate (70% base), variable damage
+- Lasers: 8 hex range, accurate (85% base), consistent damage
+- Missiles: 12 hex range, less accurate (70% base), variable damage
 
 ACCURACY MODIFIERS:
-• Range penalty: -5% per hex beyond optimal range (half max range)
-• Cover bonus: -30% hit chance if target in forest
-• Forest interference: -1 hex range per forest in line of sight
-• Mountains: Block line of sight completely
+- Range penalty: -5% per hex beyond optimal range (half max range)
+- Cover bonus: -30% hit chance if target in forest
+- Forest interference: -1 hex range per forest in line of sight
+- Mountains: Block line of sight completely
 
 DAMAGE SYSTEM:
-• Armor absorbs damage first, then structure
-• Mechs destroyed when structure reaches 0
-• Lasers: Consistent damage with minimal variance
-• Missiles: Highly variable (50% to 150% base damage)
+- Armor absorbs damage first, then structure
+- Mechs destroyed when structure reaches 0
+- Lasers: Consistent damage with minimal variance
+- Missiles: Highly variable (50% to 150% base damage)
 
 === TURN SEQUENCE ===
 INITIATIVE ORDER:
-• Faster mechs activate first each turn
-• Initiative calculated by mech speed rating
-• Order displayed in right panel with current mech highlighted
+- Faster mechs activate first each turn
+- Initiative calculated by mech speed rating
+- Order displayed in right panel with current mech highlighted
 
 MECH PHASES:
 1. MOVEMENT: Move up to speed rating in hexes
@@ -1728,64 +1759,39 @@ MECH PHASES:
 3. DONE: Mech activation complete
 
 TURN FLOW:
-• Each mech activates individually in initiative order
-• Complete all mech activations to finish turn
-• New turn begins with fresh movement and attack actions
+- Each mech activates individually in initiative order
+- Complete all mech activations to finish turn
+- New turn begins with fresh movement and attack actions
 
 === MULTI-PLAYER STRATEGY ===
-• In 3+ player games, temporary alliances may form naturally
-• Target selection becomes crucial - who to attack first?
-• Positioning to avoid being gang-up targets
-• Monitor all players' mech health and positioning
+- In 3+ player games, temporary alliances may form naturally
+- Target selection becomes crucial - who to attack first?
+- Positioning to avoid being gang-up targets
+- Monitor all players' mech health and positioning
 
 === AI BEHAVIOR ===
-• Advanced tactical AI with positioning analysis
-• Evaluates cover, range, and damage potential
-• Chooses optimal targets and weapon types
-• Uses terrain strategically for protection
-• In multi-player games, AI chooses targets based on threat level
+- Advanced tactical AI with positioning analysis
+- Evaluates cover, range, and damage potential
+- Chooses optimal targets and weapon types
+- Uses terrain strategically for protection
+- In multi-player games, AI chooses targets based on threat level
 
 === VICTORY CONDITIONS ===
-• Eliminate all enemy mechs to win
-• In multi-player: Last player with living mechs wins
-• Game ends immediately when only one player remains
-• Strategic positioning and smart targeting key to success
+- Eliminate all enemy mechs to win
+- In multi-player: Last player with living mechs wins
+- Game ends immediately when only one player remains
+- Strategic positioning and smart targeting key to success
 
 === TIPS FOR SUCCESS ===
-• Use forests for cover against enemy fire
-• Keep faster mechs mobile to avoid concentrated fire
-• Target damaged mechs to eliminate threats quickly
-• Control range - engage at your weapon's optimal distance
-• Use terrain to break enemy line of sight
-• In multi-player: Consider when to engage vs when to let others fight
+- Use forests for cover against enemy fire
+- Keep faster mechs mobile to avoid concentrated fire
+- Target damaged mechs to eliminate threats quickly
+- Control range - engage at your weapon's optimal distance
+- Use terrain to break enemy line of sight
+- In multi-player: Consider when to engage vs when to let others fight
 
-Good hunting, MechWarrior! The battlefield awaits your command.
-        """
+Good hunting, MechWarrior! The battlefield awaits your command."""
         
-        # Create help window
-        help_window = tk.Toplevel(self.root)
-        help_window.title("pyMechAttack - Complete Guide")
-        help_window.geometry("700x600")
-        help_window.resizable(True, True)
-        help_window.transient(self.root)
-        help_window.grab_set()
-        
-        # Center the help window
-        if self.root:
-            help_window.geometry("+%d+%d" % (self.root.winfo_rootx() + 50, self.root.winfo_rooty() + 50))
-        else:
-            # Center on screen if no root window
-            help_window.update_idletasks()
-            x = (help_window.winfo_screenwidth() // 2) - (300)
-            y = (help_window.winfo_screenheight() // 2) - (250)
-            help_window.geometry(f"+{x}+{y}")
-        
-        # Add text widget with scrollbar
-        text_frame = ttk.Frame(help_window)
-        text_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
-        text_widget = tk.Text(text_frame, wrap=tk.WORD, font=("Arial", 10))
-        scrollbar = ttk.Scrollbar(text_frame, orient=tk.VERTICAL, command=text_widget.yview)
         text_widget.configure(yscrollcommand=scrollbar.set)
         
         text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)

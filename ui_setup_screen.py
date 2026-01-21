@@ -37,6 +37,7 @@ class GameSetupScreen:
         self.player_count_var = None
         self.ai_speed_var = None
         self.proximity_var = None
+        self.sound_effects_var = None
         self.player_name_vars = []
         self.player_type_vars = []
         self.player_config_frame = None
@@ -46,14 +47,14 @@ class GameSetupScreen:
         # Create the setup window as the main window
         self.setup_window = tk.Tk()
         self.setup_window.title("pyMechAttack Game Setup")
-        self.setup_window.geometry("600x700")
+        self.setup_window.geometry("620x800")
         self.setup_window.resizable(True, True)
         
         # Center the window on screen
         self.setup_window.update_idletasks()
-        x = (self.setup_window.winfo_screenwidth() // 2) - (300)
-        y = (self.setup_window.winfo_screenheight() // 2) - (350)
-        self.setup_window.geometry(f"600x700+{x}+{y}")
+        x = (self.setup_window.winfo_screenwidth() // 2) - (310)
+        y = (self.setup_window.winfo_screenheight() // 2) - (400)
+        self.setup_window.geometry(f"620x800+{x}+{y}")
         
         # Ensure it's visible and on top
         self.setup_window.lift()
@@ -87,13 +88,16 @@ class GameSetupScreen:
         
         # Player configuration area
         self.player_config_frame = ttk.Frame(scrollable_frame)
-        self.player_config_frame.pack(fill=tk.X, pady=(0, 15))
+        self.player_config_frame.pack(fill=tk.X, pady=(0, 10))
         
         # AI Settings
         self._create_ai_settings_section(scrollable_frame)
         
         # Initial Proximity Settings
         self._create_proximity_settings_section(scrollable_frame)
+        
+        # Sound Effects Settings
+        self._create_sound_settings_section(scrollable_frame)
         
         # Buttons
         self._create_buttons(scrollable_frame)
@@ -123,7 +127,7 @@ class GameSetupScreen:
     def _create_ai_settings_section(self, parent):
         """Create the AI settings section"""
         ai_settings_frame = ttk.LabelFrame(parent, text="AI Settings", padding="10")
-        ai_settings_frame.pack(fill=tk.X, pady=(0, 20))
+        ai_settings_frame.pack(fill=tk.X, pady=(0, 10))
         
         speed_frame = ttk.Frame(ai_settings_frame)
         speed_frame.pack(fill=tk.X)
@@ -139,7 +143,7 @@ class GameSetupScreen:
     def _create_proximity_settings_section(self, parent):
         """Create the initial proximity settings section"""
         proximity_settings_frame = ttk.LabelFrame(parent, text="Initial Proximity", padding="10")
-        proximity_settings_frame.pack(fill=tk.X, pady=(0, 20))
+        proximity_settings_frame.pack(fill=tk.X, pady=(0, 10))
         
         proximity_frame = ttk.Frame(proximity_settings_frame)
         proximity_frame.pack(fill=tk.X)
@@ -159,6 +163,15 @@ class GameSetupScreen:
         
         ttk.Label(proximity_settings_frame, text="Controls how close teams spawn to each other at game start", 
                  font=("Arial", 9), foreground="gray").pack(pady=(5, 0))
+    
+    def _create_sound_settings_section(self, parent):
+        """Create the sound effects settings section"""
+        sound_settings_frame = ttk.LabelFrame(parent, text="Sound Effects", padding="8")
+        sound_settings_frame.pack(fill=tk.X, pady=(0, 15))
+        
+        self.sound_effects_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(sound_settings_frame, text="Enable Sound Effects", 
+                       variable=self.sound_effects_var).pack(anchor=tk.W)
     
     def _create_buttons(self, parent):
         """Create the action buttons"""
@@ -265,6 +278,7 @@ class GameSetupScreen:
             'num_players': self.player_count_var.get(),
             'ai_speed': self.ai_speed_var.get(),
             'proximity': self.proximity_var.get(),
+            'sound_effects_enabled': self.sound_effects_var.get(),
             'players': []
         }
         
