@@ -63,44 +63,50 @@ class GameSetupScreen:
         self.setup_window.after(100, lambda: self.setup_window.attributes('-topmost', False))
         
         # Main frame with scrollable content
-        main_canvas = tk.Canvas(self.setup_window)
-        scrollbar = ttk.Scrollbar(self.setup_window, orient="vertical", command=main_canvas.yview)
-        scrollable_frame = ttk.Frame(main_canvas)
+        self.main_canvas = tk.Canvas(self.setup_window)
+        scrollbar = ttk.Scrollbar(self.setup_window, orient="vertical", command=self.main_canvas.yview)
+        self.scrollable_frame = ttk.Frame(self.main_canvas)
         
-        scrollable_frame.bind(
+        # Update scroll region when content changes
+        self.scrollable_frame.bind(
             "<Configure>",
-            lambda e: main_canvas.configure(scrollregion=main_canvas.bbox("all"))
+            lambda e: self._update_scroll_region()
         )
         
-        main_canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        main_canvas.configure(yscrollcommand=scrollbar.set)
+        self.main_canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        self.main_canvas.configure(yscrollcommand=scrollbar.set)
         
-        main_canvas.pack(side="left", fill="both", expand=True, padx=20, pady=20)
+        # Enable mouse wheel scrolling
+        self.main_canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+        self.main_canvas.bind_all("<Button-4>", self._on_mousewheel)  # Linux scroll up
+        self.main_canvas.bind_all("<Button-5>", self._on_mousewheel)  # Linux scroll down
+        
+        self.main_canvas.pack(side="left", fill="both", expand=True, padx=20, pady=20)
         scrollbar.pack(side="right", fill="y")
         
         # Title
-        title_label = ttk.Label(scrollable_frame, text="pyMechAttack Setup", 
+        title_label = ttk.Label(self.scrollable_frame, text="pyMechAttack Setup", 
                                font=("Arial", 16, "bold"))
         title_label.pack(pady=(0, 20))
         
         # Game Configuration
-        self._create_game_config_section(scrollable_frame)
+        self._create_game_config_section(self.scrollable_frame)
         
         # Player configuration area
-        self.player_config_frame = ttk.Frame(scrollable_frame)
+        self.player_config_frame = ttk.Frame(self.scrollable_frame)
         self.player_config_frame.pack(fill=tk.X, pady=(0, 10))
         
         # AI Settings
-        self._create_ai_settings_section(scrollable_frame)
+        self._create_ai_settings_section(self.scrollable_frame)
         
         # Initial Proximity Settings
-        self._create_proximity_settings_section(scrollable_frame)
+        self._create_proximity_settings_section(self.scrollable_frame)
         
         # Sound Effects Settings
-        self._create_sound_settings_section(scrollable_frame)
+        self._create_sound_settings_section(self.scrollable_frame)
         
         # Buttons
-        self._create_buttons(scrollable_frame)
+        self._create_buttons(self.scrollable_frame)
         
         # Initialize player configuration
         self.player_name_vars = []
@@ -238,6 +244,10 @@ class GameSetupScreen:
             # Set initial state
             if not type_var.get():  # AI player
                 name_entry.config(state=tk.DISABLED)
+        
+        # Force update of scroll region after adding/removing player frames
+        self.player_config_frame.update_idletasks()
+        self._update_scroll_region()
     
     def _on_player_type_change(self, player_index: int):
         """Handle player type change for a specific player"""
@@ -297,8 +307,27 @@ class GameSetupScreen:
         """Handle cancel button click"""
         self.on_cancel_callback()
     
+    def _update_scroll_region(self):
+        """Update the canvas scroll region to fit all content"""
+        if hasattr(self, 'main_canvas') and self.main_canvas.winfo_exists():
+            self.main_canvas.update_idletasks()
+            self.main_canvas.configure(scrollregion=self.main_canvas.bbox("all"))
+    
+    def _on_mousewheel(self, event):
+        """Handle mouse wheel scrolling"""
+        if hasattr(self, 'main_canvas') and self.main_canvas.winfo_exists():
+            if event.num == 5 or event.delta < 0:  # Scroll down
+                self.main_canvas.yview_scroll(1, "units")
+            elif event.num == 4 or event.delta > 0:  # Scroll up
+                self.main_canvas.yview_scroll(-1, "units")
+    
     def destroy(self):
         """Destroy the setup window"""
         if self.setup_window and self.setup_window.winfo_exists():
+            # Unbind mouse wheel events before destroying
+            if hasattr(self, 'main_canvas'):
+                self.main_canvas.unbind_all("<MouseWheel>")
+                self.main_canvas.unbind_all("<Button-4>")
+                self.main_canvas.unbind_all("<Button-5>")
             self.setup_window.quit()
             self.setup_window.destroy()
