@@ -165,16 +165,32 @@ class BoardManager:
                 q_range = range(max(-self.board_size, -corner_offset - zone_width), -corner_offset + 1)
             r_range = range(-zone_width // 2, zone_width // 2 + 1)
         else:  # Diagonal corners
-            # For diagonal corners, search from corner_offset toward the edge
-            if q_sign > 0:
-                q_range = range(corner_offset, min(corner_offset + zone_width, self.board_size + 1))
+            # Hex distance formula differs based on whether q and r have same or opposite signs
+            # Same sign (NW/SE): distance ≈ |q| + |r|, so each coord is ~half the distance
+            # Opposite sign (NE/SW): distance ≈ max(|q|,|r|), so each coord is ~full distance
+            
+            if q_sign == r_sign:
+                # Northwest or Southeast - same sign diagonal
+                # These corners are farther from center, use corner_offset directly
+                # Distance from center ≈ 2 * corner_offset
+                adjusted_offset = corner_offset
             else:
-                q_range = range(max(-self.board_size, -corner_offset - zone_width), -corner_offset + 1)
+                # Northeast or Southwest - opposite sign diagonal  
+                # These corners are closer to center in hex distance
+                # To match the distance of same-sign diagonals, double the offset
+                # Distance from center ≈ corner_offset (max of the two coords)
+                adjusted_offset = corner_offset * 2
+            
+            # For diagonal corners, search from adjusted_offset toward the edge
+            if q_sign > 0:
+                q_range = range(adjusted_offset, min(adjusted_offset + zone_width, self.board_size + 1))
+            else:
+                q_range = range(max(-self.board_size, -adjusted_offset - zone_width), -adjusted_offset + 1)
             
             if r_sign > 0:
-                r_range = range(corner_offset, min(corner_offset + zone_width, self.board_size + 1))
+                r_range = range(adjusted_offset, min(adjusted_offset + zone_width, self.board_size + 1))
             else:
-                r_range = range(max(-self.board_size, -corner_offset - zone_width), -corner_offset + 1)
+                r_range = range(max(-self.board_size, -adjusted_offset - zone_width), -adjusted_offset + 1)
         
         return q_range, r_range
     
