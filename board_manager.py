@@ -41,10 +41,13 @@ class BoardManager:
     }
     
     # Proximity configuration for starting positions
+    # Values represent distance from center as fraction of board_size
+    # For board_size=20: close≈11, medium≈8, far≈6 hexes from center
+    # Due to hex geometry, closer to center can mean MORE distance in multi-player games
     PROXIMITY_MULTIPLIERS = {
-        "close": 0.25,
-        "medium": 0.65,
-        "far": 0.95
+        "close": 0.55,   # Relatively far from center - quick engagement
+        "medium": 0.40,  # Moderate distance - balanced gameplay
+        "far": 0.30      # Closer to center - extended maneuvering in 4-player
     }
     
     MIN_DISTANCES = {
@@ -132,13 +135,14 @@ class BoardManager:
         """
         return self.hex_tiles
     
-    def _get_corner_ranges(self, side: str, corner_offset: int) -> Tuple[range, range]:
+    def _get_corner_ranges(self, side: str, corner_offset: int, zone_expansion: int = 0) -> Tuple[range, range]:
         """
         Get coordinate ranges for a specific corner/side
         
         Args:
             side: Starting side name
-            corner_offset: Offset distance from board edge
+            corner_offset: Distance from center where mechs spawn (higher = farther from center)
+            zone_expansion: Additional width to add to search zone (for retries)
             
         Returns:
             Tuple of (q_range, r_range)
@@ -150,20 +154,27 @@ class BoardManager:
         q_sign = corner["q_sign"]
         r_sign = corner["r_sign"]
         
+        # Define the spawn zone width - wider zone for better position selection
+        zone_width = 8 + zone_expansion  # Hexes to search in each direction
+        
         if r_sign == 0:  # Left/right side (special case)
-            q_end = q_sign * self.board_size + (1 if q_sign > 0 else -1)
-            q_range = range(q_sign * corner_offset, q_end)
-            r_range = range(-corner_offset // 2, corner_offset // 2 + 1)
+            # For left/right, extend from corner_offset toward edge
+            if q_sign > 0:  # Right side
+                q_range = range(corner_offset, min(corner_offset + zone_width, self.board_size + 1))
+            else:  # Left side
+                q_range = range(max(-self.board_size, -corner_offset - zone_width), -corner_offset + 1)
+            r_range = range(-zone_width // 2, zone_width // 2 + 1)
         else:  # Diagonal corners
+            # For diagonal corners, search from corner_offset toward the edge
             if q_sign > 0:
-                q_range = range(corner_offset, self.board_size + 1)
+                q_range = range(corner_offset, min(corner_offset + zone_width, self.board_size + 1))
             else:
-                q_range = range(-self.board_size, -corner_offset + 1)
+                q_range = range(max(-self.board_size, -corner_offset - zone_width), -corner_offset + 1)
             
             if r_sign > 0:
-                r_range = range(corner_offset, self.board_size + 1)
+                r_range = range(corner_offset, min(corner_offset + zone_width, self.board_size + 1))
             else:
-                r_range = range(-self.board_size, -corner_offset + 1)
+                r_range = range(max(-self.board_size, -corner_offset - zone_width), -corner_offset + 1)
         
         return q_range, r_range
     
@@ -196,56 +207,62 @@ class BoardManager:
         # Calculate corner offset based on proximity setting
         corner_offset = int(self.board_size * self.PROXIMITY_MULTIPLIERS[initial_proximity])
         
-        # Get search ranges using corner mapping
-        q_range, r_range = self._get_corner_ranges(side, corner_offset)
+        # Try progressively wider search zones if needed
+        zone_attempts = [0, 3, 6, 9]  # Additional offsets to try
         
-        # Find all suitable hexes (clear or forest terrain) in the focused area
-        candidates = []
-        for q in q_range:
-            for r in r_range:
-                if (q, r) in self.hex_tiles:
-                    hex_tile = self.hex_tiles[(q, r)]
-                    # Only allow clear terrain or forests for starting positions
-                    if hex_tile.terrain_type in self.VALID_STARTING_TERRAINS:
-                        candidates.append((q, r))
-        
-        # If we have candidates, select them with reasonable spacing
-        if candidates:
-            # Sort by distance from center r=0 for better formation
-            candidates.sort(key=lambda pos: (abs(pos[1]), abs(pos[0])))
+        for zone_expansion in zone_attempts:
+            if len(suitable_positions) >= num_mechs:
+                break
+                
+            # Get search ranges using corner mapping with expanded zone
+            q_range, r_range = self._get_corner_ranges(side, corner_offset, zone_expansion)
             
-            selected = []
-            # Set minimum distance between mechs based on proximity setting
-            min_distance = self.MIN_DISTANCES[initial_proximity]
+            # Find all suitable hexes (clear or forest terrain) in the focused area
+            candidates = []
+            for q in q_range:
+                for r in r_range:
+                    if (q, r) in self.hex_tiles:
+                        hex_tile = self.hex_tiles[(q, r)]
+                        # Only allow clear terrain or forests for starting positions
+                        if hex_tile.terrain_type in self.VALID_STARTING_TERRAINS:
+                            # Avoid duplicates if we're on a retry
+                            if (q, r) not in [pos for pos in suitable_positions]:
+                                candidates.append((q, r))
             
-            # Try to select well-spaced positions
-            for candidate in candidates:
-                if not selected:
-                    # Always take the first candidate (closest to center)
-                    selected.append(candidate)
-                else:
-                    # Check if this position has reasonable spacing
-                    too_close = False
-                    for selected_pos in selected:
-                        distance = self.hex_tiles[candidate].distance_to(self.hex_tiles[selected_pos])
-                        if distance < min_distance:
-                            too_close = True
-                            break
-                    
-                    if not too_close:
-                        selected.append(candidate)
-                        if len(selected) >= num_mechs:
-                            break
-            
-            # If we don't have enough well-spaced positions, add closest remaining candidates
-            if len(selected) < num_mechs:
+            # If we have new candidates, select them with reasonable spacing
+            if candidates:
+                # Sort by distance from center r=0 for better formation
+                candidates.sort(key=lambda pos: (abs(pos[1]), abs(pos[0])))
+                
+                # Set minimum distance between mechs based on proximity setting
+                min_distance = self.MIN_DISTANCES[initial_proximity]
+                
+                # Try to select well-spaced positions
                 for candidate in candidates:
-                    if candidate not in selected:
-                        selected.append(candidate)
-                        if len(selected) >= num_mechs:
-                            break
-            
-            suitable_positions = selected[:num_mechs]
+                    if not suitable_positions:
+                        # Always take the first candidate (closest to center)
+                        suitable_positions.append(candidate)
+                    else:
+                        # Check if this position has reasonable spacing
+                        too_close = False
+                        for selected_pos in suitable_positions:
+                            distance = self.hex_tiles[candidate].distance_to(self.hex_tiles[selected_pos])
+                            if distance < min_distance:
+                                too_close = True
+                                break
+                        
+                        if not too_close:
+                            suitable_positions.append(candidate)
+                            if len(suitable_positions) >= num_mechs:
+                                break
+                
+                # If we don't have enough well-spaced positions, add closest remaining candidates
+                if len(suitable_positions) < num_mechs:
+                    for candidate in candidates:
+                        if candidate not in suitable_positions:
+                            suitable_positions.append(candidate)
+                            if len(suitable_positions) >= num_mechs:
+                                break
         
         # Enhanced fallback with guaranteed visible positions
         if len(suitable_positions) < num_mechs:
