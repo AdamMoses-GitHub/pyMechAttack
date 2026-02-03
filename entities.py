@@ -273,7 +273,27 @@ class Mech:
         return self.current_phase == MechPhase.MOVEMENT and self.get_remaining_movement() > 0
     
     def calculate_hit_chance(self, target: 'Mech', weapon_type: str) -> float:
-        """Calculate hit chance against target with weapon type"""
+        """
+        Calculate probability of hitting target with specified weapon.
+        
+        Combat Formula:
+        - Base accuracy: 0.85 for lasers (85%), 0.70 for missiles (70%)
+        - Range penalty: -5% per hex beyond optimal range (half of weapon's max range)
+        - Cover penalty: -30% if target is in forest terrain
+        - Forest LOS penalty: -10% per forest hex in line of sight
+        - LOS requirement: Returns 0.0 if no line of sight or out of range
+        
+        Args:
+            target: The Mech being targeted
+            weapon_type: "laser" (range 8, accurate) or "missile" (range 12, less accurate)
+            
+        Returns:
+            Float between 0.0 and 1.0 representing hit probability
+            
+        Example:
+            >>> mech.calculate_hit_chance(enemy, "laser")  # 6 hexes away, in forest
+            0.50  # 85% base - 10% range penalty - 30% cover - 10% forest LOS
+        """
         distance = self.hex_tile.distance_to(target.hex_tile)
         
         # Check line of sight using callback if available

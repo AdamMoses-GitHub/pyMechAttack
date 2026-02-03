@@ -4,6 +4,7 @@ Handles all combat-related logic including weapon ranges, targeting, and attack 
 """
 from typing import TYPE_CHECKING, Tuple, Optional, Union
 from enum import Enum
+from dataclasses import dataclass
 
 if TYPE_CHECKING:
     from entities import Mech, HexTile
@@ -11,12 +12,28 @@ if TYPE_CHECKING:
     import hex_utils
 
 
+@dataclass
+class WeaponConfig:
+    """Configuration for a weapon type"""
+    name: str
+    range: int
+    base_accuracy: float
+    damage_variance: float  # 0.0 to 1.0, represents damage consistency
+    consistency_type: str  # "high" or "low"
+
+
 class WeaponType(Enum):
     """Enumeration of available weapon types"""
     LASER = "laser"
     MISSILE = "missile"
     
-    # Weapon range configuration
+    # Centralized weapon configuration
+    CONFIGS = {
+        "laser": WeaponConfig("Laser", 8, 0.85, 0.1, "high"),
+        "missile": WeaponConfig("Missile", 12, 0.70, 0.5, "low")
+    }
+    
+    # Legacy range access for backward compatibility
     RANGES = {
         "laser": 8,
         "missile": 12

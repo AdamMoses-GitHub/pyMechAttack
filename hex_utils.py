@@ -61,6 +61,14 @@ def has_line_of_sight(from_hex: HexTile, to_hex: HexTile, hex_tiles: Dict[Tuple[
     Mountains block LOS completely.
     Forests reduce effective range by 1 per forest hex in the line.
     """
+    # Input validation for type safety
+    if not isinstance(from_hex, HexTile):
+        raise TypeError(f"Expected HexTile for from_hex, got {type(from_hex).__name__}")
+    if not isinstance(to_hex, HexTile):
+        raise TypeError(f"Expected HexTile for to_hex, got {type(to_hex).__name__}")
+    if not isinstance(hex_tiles, dict):
+        raise TypeError(f"Expected dict for hex_tiles, got {type(hex_tiles).__name__}")
+    
     if from_hex == to_hex:
         return True, 0
     
@@ -89,6 +97,12 @@ def has_line_of_sight(from_hex: HexTile, to_hex: HexTile, hex_tiles: Dict[Tuple[
 
 def get_line_hexes(from_hex: HexTile, to_hex: HexTile) -> list[tuple[int, int]]:
     """Get all hex coordinates along a line between two hexes using hex line drawing."""
+    # Input validation for type safety
+    if not isinstance(from_hex, HexTile):
+        raise TypeError(f"Expected HexTile for from_hex, got {type(from_hex).__name__}")
+    if not isinstance(to_hex, HexTile):
+        raise TypeError(f"Expected HexTile for to_hex, got {type(to_hex).__name__}")
+    
     # Convert to cube coordinates for easier line calculation
     def axial_to_cube(q, r):
         x = q

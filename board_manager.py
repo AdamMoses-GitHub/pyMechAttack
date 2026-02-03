@@ -100,6 +100,20 @@ class BoardManager:
                 hex_tile = HexTile(q, r, terrain)
                 self.hex_tiles[(q, r)] = hex_tile
     
+    def get_terrain_stats(self) -> Dict[str, int]:
+        """
+        Get terrain type counts (cached for performance)
+        
+        Returns:
+            Dictionary mapping terrain type names to their counts on the board
+        """
+        if self._terrain_stats_cache is None:
+            self._terrain_stats_cache = {}
+            for hex_tile in self.hex_tiles.values():
+                terrain = hex_tile.terrain_type
+                self._terrain_stats_cache[terrain] = self._terrain_stats_cache.get(terrain, 0) + 1
+        return self._terrain_stats_cache.copy()
+    
     def get_hex(self, q: int, r: int) -> Optional[HexTile]:
         """
         Get a hex tile at the specified coordinates

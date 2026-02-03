@@ -295,6 +295,26 @@ class GameWindowUI:
             state = tk.NORMAL if enabled else tk.DISABLED
             button_map[button_name].config(state=state)
     
+    def update_button_tooltip(self, button_name: str, reason: str = ""):
+        """
+        Update button text with tooltip/reason for disabled state
+        
+        Args:
+            button_name: Name of the button ('laser' or 'missile')
+            reason: Reason text to display (e.g., "Out of Range", "No Line of Sight")
+        """
+        button_map = {
+            'laser': (self.attack_laser_btn, "🔫 Laser"),
+            'missile': (self.attack_missile_btn, "🚀 Missile")
+        }
+        
+        if button_name in button_map and button_map[button_name][0]:
+            button, base_text = button_map[button_name]
+            if reason:
+                button.config(text=f"{base_text}\n({reason})")
+            else:
+                button.config(text=base_text)
+    
     def update_status(self, message: str):
         """Update the status bar message"""
         if self.status_label:
