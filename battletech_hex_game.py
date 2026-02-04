@@ -325,7 +325,9 @@ F2 - Show performance stats"""
             'check_victory': self.check_victory,
             'schedule_action': self._schedule_ai_action,
             'calculate_reachable': self.calculate_reachable_hexes,
-            'has_line_of_sight': self.has_line_of_sight
+            'has_line_of_sight': self.has_line_of_sight,
+            'advance_to_attack': lambda mech: self.turn_manager.phase_handler.advance_to_attack(mech),
+            'advance_to_done': lambda mech: self.turn_manager.phase_handler.advance_to_done(mech, reason="AI turn complete")
         }
         self.ai = AIController(self.state, self.combat, hex_utils, ai_callbacks)
         

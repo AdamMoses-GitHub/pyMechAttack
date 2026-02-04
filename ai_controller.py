@@ -41,6 +41,8 @@ class AIController:
                 - 'schedule_action': Function to schedule delayed actions (root.after wrapper)
                 - 'calculate_reachable': Function to calculate reachable hexes
                 - 'has_line_of_sight': Function to check LOS between hexes
+                - 'advance_to_attack': Function(mech) to transition from movement to attack phase
+                - 'advance_to_done': Function(mech) to transition from attack to done phase
         """
         self.state = game_state
         self.combat = combat_system
@@ -114,8 +116,7 @@ class AIController:
                     
                     # Check if should continue moving or advance to attack
                     if mech.get_remaining_movement() <= 0 or self.should_stop_moving(mech, enemies):
-                        mech.end_movement_phase()
-                        self.callbacks['log'](f"AI {mech.stats.name} ends movement phase")
+                        self.callbacks['advance_to_attack'](mech)
                         # Continue to attack phase immediately
                         self._execute_attack_phase(mech, enemies)
                         self.callbacks['log'](f"AI {mech.stats.name} ends turn")
@@ -125,11 +126,11 @@ class AIController:
                         self.schedule_action(lambda: self.execute_turn(mech), 0.5)
                     return
                 else:
-                    mech.end_movement_phase()
+                    self.callbacks['advance_to_attack'](mech)
             else:
-                mech.end_movement_phase()
+                self.callbacks['advance_to_attack'](mech)
         else:
-            mech.end_movement_phase()
+            self.callbacks['advance_to_attack'](mech)
         
         # If we didn't return above, movement phase is complete
         self._execute_attack_phase(mech, enemies)
@@ -149,8 +150,6 @@ class AIController:
             if target.is_destroyed():
                 self.callbacks['log'](f"{target.stats.name} is destroyed!")
                 self.callbacks['check_victory']()
-            
-            mech.end_attack_phase()
     
     def schedule_action(self, action_func: Callable, delay_multiplier: float = 1.0):
         """
