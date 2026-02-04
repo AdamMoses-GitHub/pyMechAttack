@@ -1,61 +1,71 @@
-# pyMechAttack
-A turn-based tactical mech combat game built with Python and Pygame. Command a lance of four distinct mechs on hex-based battlefields in intense strategic warfare.
+# PyMechAttack
+
+*Because managing turn-based BattleTech combat on pen-and-paper is like playing chess while doing calculus in your head.*
+
+![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)
+![Python](https://img.shields.io/badge/python-3.10+-brightgreen.svg)
+![License](https://img.shields.io/badge/license-MIT-green.svg)
+
+![App Screenshot](./pymechattack_1.jpg)
 
 ## About
-pyMechAttack is a fully-featured tactical strategy game inspired by BattleTech, where players maneuver giant war machines across varied terrain, utilizing cover, line-of-sight mechanics, and dual weapon systems to outmaneuver and destroy their opponents.
 
-## Key Features
+**The Pain:** Traditional BattleTech-style hex-based tactical combat requires tracking movement points, weapon ranges, line-of-sight calculations, initiative orders, damage tracking, and turn phases—all while managing multiple mechs across a hex grid. That's a lot of mental overhead when you just want to blow stuff up with giant robots.
 
-### Multi-Player Combat
-- **2-4 player support** with any combination of human and AI opponents
-- **Initiative-based turn system** where faster mechs activate first
-- **Configurable AI difficulty** with adjustable turn delays and strategic decision-making
-- **Color-coded factions** for easy identification on the battlefield
+**The Solution:** PyMechAttack is a streamlined, Python-powered hex-based tactical combat simulator that handles all the tedious calculations for you. It features intelligent AI opponents, smooth animations, automated turn management, and a clean Tkinter-based interface. Whether you're playing solo against AI commanders or battling friends in a hot-seat multiplayer setup, the game manages the complexity so you can focus on tactics.
 
-### Four Distinct Mech Classes (per player)
-- **Atlas** - Heavy assault mech with devastating firepower and thick armor
-- **Centurion** - Balanced medium mech offering versatility
-- **Griffin** - Fast medium striker for flanking maneuvers
-- **Locust** - Light scout with exceptional speed and mobility
+**Repository:** [https://github.com/AdamMoses-GitHub/pyMechAttack](https://github.com/AdamMoses-GitHub/pyMechAttack)
 
-### Tactical Combat System
-- **Dual weapon systems**: Reliable lasers and long-range missiles with different accuracy/damage profiles
-- **Dual armor layers**: Armor and internal structure for realistic damage modeling
-- **Two-phase turns**: Movement phase followed by attack phase
-- **Advanced combat mechanics**: Range penalties, cover bonuses, and line-of-sight calculations
-- **Terrain effects**: Five terrain types (Clear, Forest, Shallow Water, Deep Water, Mountains) affecting movement and combat
+## What It Does
 
-### Strategic Gameplay
-- **Large 20x20 hex battlefields** with dynamic terrain generation
-- **Sophisticated pathfinding** showing movement costs and optimal routes
-- **Cover mechanics**: Forests provide defensive bonuses and reduce weapon range
-- **Line-of-sight system**: Mountains block LOS completely, forests interfere
-- **Tactical positioning**: Utilize terrain, range, and mech capabilities to gain advantage
+### The Main Features
+- **2-4 Player Support**: Configure 2, 3, or 4 players with mix-and-match human and AI opponents
+- **Smart AI Commanders**: 16 unique AI personalities with tactical decision-making for movement and combat
+- **Dynamic Hex Battlefield**: Procedurally generated terrain with forests, water, mountains affecting movement and line-of-sight
+- **Turn-Based Combat**: Initiative-based activation with separate movement and attack phases
+- **Visual Effects**: Smooth movement animations, laser beams, missile trails, and explosion effects
+- **Flexible Positioning**: Configure starting positions (close/medium/far) to control engagement distance
 
-### Polish & Features
-- **Smooth 60 FPS animations** with weapon effects, explosions, and movement
-- **Comprehensive UI**: Initiative tracker, combat log, detailed mech stats, and target information
-- **Performance optimization**: Canvas caching, dirty rectangle tracking, and FPS monitoring
-- **Configurable deployment**: Choose starting positions (Close/Medium/Far) for different gameplay styles
-- **In-game help system**: Complete guide accessible anytime
-- **Smart AI opponents**: Evaluates damage potential, cover, range, and target priority
+### The Nerdy Stuff
+- **Modular Architecture**: 15+ specialized modules for clean separation of concerns (entities, combat, AI, UI, animations)
+- **A* Pathfinding**: Efficient hex-grid pathfinding with terrain cost evaluation
+- **Zero External Dependencies**: Pure Python 3.10+ using only the standard library (Tkinter for GUI)
+- **Canvas Object Caching**: Performance-optimized rendering with dirty-rectangle tracking
+- **Line-of-Sight Algorithm**: Bresenham-style hex line drawing for accurate LOS calculations with terrain modifiers
+- **Type-Safe Design**: Comprehensive type hints and custom exception hierarchy for robust error handling
 
-## Requirements
-- Python 3.x
-- Pygame
-- tkinter (usually included with Python)
+## Quick Start (TL;DR)
 
-## How to Play
-1. Run the game and configure your match (player count, AI settings, deployment distance)
-2. Select your mechs by clicking on them during your turn
-3. Move by clicking on highlighted hexes within your movement range
-4. Target enemies by clicking on them, then choose Laser or Missile weapons
-5. Eliminate all enemy mechs to achieve victory!
+For detailed installation and usage instructions, see [INSTALL_AND_USAGE.md](INSTALL_AND_USAGE.md).
 
-## Controls
-- **Click & drag**: Pan the battlefield view
-- **Click mech**: Select/deselect your units
-- **Click hex**: Move to location
-- **Click enemy**: Target for attack
-- **F1**: Toggle FPS display
-- **Help button**: Access complete game guide
+```bash
+# Clone the repository
+git clone https://github.com/AdamMoses-GitHub/pyMechAttack.git
+cd pyMechAttack
+
+# Run the game (Python 3.10+ required)
+python battletech_hex_game.py
+```
+
+## Tech Stack
+
+| Component | Purpose | Why This One |
+|-----------|---------|--------------|
+| **Python 3.10+** | Core language | Type hints, structural pattern matching, performance |
+| **Tkinter** | GUI framework | Cross-platform, bundled with Python, no external deps |
+| **Standard Library** | All utilities | Zero-dependency philosophy for easy deployment |
+| **Axial Coordinates** | Hex grid system | Efficient distance/pathfinding calculations vs offset coords |
+| **A* Algorithm** | Pathfinding | Guaranteed optimal paths with terrain cost evaluation |
+| **Canvas API** | Rendering | Direct pixel control for animations and hex drawing |
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Contributing
+
+Pull requests are welcome! For major changes, please open an issue first to discuss what you'd like to change. This project values clean code, type safety, and modular design.
+
+---
+
+<sub>battletech, hex-based strategy, turn-based tactics, mech combat, python game, tkinter gui, a-star pathfinding, tactical simulator, ai opponents, procedural terrain, line of sight, initiative system, hex grid combat, robot warfare, strategy game, grid-based tactics, python gaming, desktop game, military simulation</sub>
